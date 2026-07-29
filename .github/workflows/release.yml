@@ -246,7 +246,10 @@ jobs:
           done
           rm -rf stackmason
           stackmason --help > /dev/null
-          python -c "from stackmason.pipeline import Pipeline; print('TestPyPI artifact imports cleanly')"
+          stackmason stacks > /dev/null
+          python -c "from stackmason.guardrails import evaluate; \
+            assert evaluate({'stacks':['rds'],'allowed_cidrs':['0.0.0.0/0']}).blocked; \
+            print('TestPyPI artifact imports and its guardrails still block')"
 
   # 6. Only now, the real thing.
   pypi:
@@ -275,4 +278,7 @@ jobs:
           done
           rm -rf stackmason
           stackmason --help > /dev/null
-          python -c "import stackmason; print('published artifact verified')"
+          stackmason stacks > /dev/null
+          python -c "from stackmason.guardrails import evaluate; \
+            assert evaluate({'stacks':['rds'],'allowed_cidrs':['0.0.0.0/0']}).blocked; \
+            print('published artifact verified, guardrails intact')"
