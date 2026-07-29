@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stackwright"
+version = "0.1.0"
+description = "Interview-driven Terraform repositories, secure by default."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Ehtisham Mubarik", email = "ehtisham@eprecisio.com" }]
+keywords = ["terraform", "infrastructure-as-code", "aws", "eks", "scaffolding",
+            "devops", "platform-engineering", "iac", "generator"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: System Administrators",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Systems Administration",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "pytest-cov>=4", "ruff"]
+
+[project.scripts]
+stackwright = "stackwright.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ehtishammubarik/stackwright"
+Issues = "https://github.com/ehtishammubarik/stackwright/issues"
+
+[tool.setuptools.packages.find]
+include = ["stackwright*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "RUF"]
+ignore = ["E501"]

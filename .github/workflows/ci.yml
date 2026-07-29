@@ -1,0 +1,84 @@
+name: CI
+
+on: [push, pull_request]
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python-version }}"
+      - run: pip install -e ".[dev]"
+      - run: pytest --cov=stackwright --cov-report=term
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install ruff
+      - run: ruff check stackwright tests
+      - run: ruff format --check stackwright tests
+
+  # The claim that matters: generated Terraform is valid against the real
+  # upstream modules. A unit test cannot check this, because the module APIs
+  # live on the registry. Getting `name` versus `cluster_name` wrong fails here
+  # and nowhere else.
+  generated-terraform-is-valid:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.8"
+
+      - run: pip install -e .
+
+      - name: Generate every stack
+        run: |
+          cat > /tmp/answers.json <<'JSON'
+          {
+            "stacks": ["eks","rds","s3","alb","elasticache"],
+            "environments": ["dev","prod"],
+            "allowed_cidrs": ["10.1.0.0/16"],
+            "cidr": "10.0.0.0/16", "az_count": 2, "k8s_version": "1.31",
+            "node_group_count": 2, "node_instance_type": "m6i.large",
+            "node_min": 2, "node_max": 6, "engine": "postgres",
+            "instance_class": "db.m6g.large", "storage_gb": 50,
+            "bucket_count": 1, "versioning": true, "replicas": 1,
+            "node_type": "cache.t4g.micro", "certificate": "", "spot": false,
+            "irsa": true, "multi_az": false, "backup_retention_days": 7,
+            "nat_gateway_per_az": false, "enable_flow_logs": true
+          }
+          JSON
+          stackwright new ci-test --answers /tmp/answers.json --yes -o /tmp/gen
+
+      - name: Generated repo passes its own format check
+        run: terraform -chdir=/tmp/gen fmt -check -recursive
+
+      - name: Generated Terraform validates against real modules
+        run: |
+          for d in /tmp/gen/environments/*/; do
+            echo "::group::$d"
+            terraform -chdir="$d" init -backend=false -input=false
+            terraform -chdir="$d" validate
+            echo "::endgroup::"
+          done
+
+      - name: No credential was emitted
+        run: |
+          if grep -rInE '(password|secret|token)[[:space:]]*=[[:space:]]*"[^"$][^"]{4,}"' /tmp/gen; then
+            echo "::error::generator emitted a literal credential"; exit 1
+          fi
+          echo "clean"
