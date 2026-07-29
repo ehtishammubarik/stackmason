@@ -144,18 +144,58 @@ jobs:
           python -c "import stackmason, pathlib; print('imported from', pathlib.Path(stackmason.__file__).parent)"
           pytest tests/ -q
 
-      - name: Smoke test the CLI entry point
+      - name: Smoke test the CLI against the installed wheel
         run: |
           stackmason --help > /dev/null
-          printf '%s\n' '{"url":"https://e.com/a","text":"Kubernetes exposes GPUs through the NVIDIA device plugin, which advertises nvidia.com/gpu as an allocatable resource on every node in the pool. Once training and inference share the same hardware, fragmentation becomes the dominant concern for the scheduler. MIG partitioning splits an A100 into as many as seven independent instances, which suits small inference models far better than whole-card allocation."}' > /tmp/in.jsonl
-          stackmason build /tmp/in.jsonl -o /tmp/ds
+          stackmason stacks > /dev/null
+
+          cat > /tmp/answers.json <<'JSON'
+          {"stacks":["eks","rds"],"environments":["dev","prod"],
+           "allowed_cidrs":["10.1.0.0/16"],"cidr":"10.0.0.0/16","az_count":2,
+           "k8s_version":"1.31","node_group_count":1,"node_instance_type":"m6i.large",
+           "node_min":2,"node_max":6,"engine":"postgres","instance_class":"db.m6g.large",
+           "storage_gb":50,"spot":false,"irsa":true,"multi_az":false,
+           "backup_retention_days":7,"nat_gateway_per_az":false,"enable_flow_logs":true}
+          JSON
+          stackmason new acme --answers /tmp/answers.json --yes -o /tmp/gen
+
           python - <<'PY'
-          import json, pathlib
-          s = json.loads(pathlib.Path("/tmp/ds/stats.json").read_text())["stats"]
-          assert s["kept"] == 1, s
-          assert pathlib.Path("/tmp/ds/manifest.json").exists()
-          print("cli smoke test passed:", s)
+          import pathlib
+          root = pathlib.Path("/tmp/gen")
+          for f in ("environments/dev/main.tf", "environments/prod/main.tf",
+                    "ARCHITECTURE.md", "DECISIONS.md", ".gitignore"):
+              assert (root / f).exists(), f
+          prod = (root / "environments/prod/main.tf").read_text()
+          assert "deletion_protection     = true" in prod
+          assert "publicly_accessible = false" in prod
+          assert "cluster_name" in prod
+          assert (root / "environments/dev/main.tf").read_text().count("deletion_protection     = false") == 1
+          print("generated repository verified")
           PY
+
+      - name: The published build must still refuse a dangerous request
+        run: |
+          # A generator whose guardrails silently stopped working would be worse
+          # than no generator, so this is asserted on the artifact itself.
+          cat > /tmp/bad.json <<'JSON'
+          {"stacks":["rds"],"environments":["prod"],"allowed_cidrs":["0.0.0.0/0"],
+           "cidr":"10.0.0.0/16","az_count":2,"engine":"postgres",
+           "instance_class":"db.m6g.large","storage_gb":50,
+           "backup_retention_days":7,"nat_gateway_per_az":false,
+           "enable_flow_logs":true,"multi_az":false}
+          JSON
+          if stackmason new bad --answers /tmp/bad.json --yes -o /tmp/badgen; then
+            echo "::error::guardrails did not block 0.0.0.0/0 on a database"; exit 1
+          fi
+          test ! -d /tmp/badgen || { echo "::error::wrote files despite blocking"; exit 1; }
+          echo "blocked correctly, wrote nothing"
+
+      - name: No credential in generated output
+        run: |
+          if grep -rInE '(password|secret|token)[[:space:]]*=[[:space:]]*"[^"$][^"]{4,}"' /tmp/gen; then
+            echo "::error::published build emitted a literal credential"; exit 1
+          fi
+          echo "clean"
 
   # 4. The sdist must be independently buildable and testable. This is the only
   #    way to catch a tarball missing a file.
