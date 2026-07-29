@@ -402,3 +402,75 @@ def test_generated_eks_uses_cluster_name_not_name(tmp_path):
     main_tf = plan.files["environments/dev/main.tf"]
     eks_block = main_tf[main_tf.index('module "eks"') :]
     assert "cluster_name" in eks_block.split("}")[0]
+
+
+# -- production intent ------------------------------------------------------
+
+PROD_SLOPPY = {
+    "stacks": ["eks", "rds"],
+    "environments": ["dev", "prod"],
+    "allowed_cidrs": ["10.1.0.0/16"],
+    "multi_az": False,
+    "az_count": 2,
+    "nat_gateway_per_az": False,
+    "node_min": 1,
+    "spot": True,
+    "backup_retention_days": 7,
+}
+
+
+def test_production_named_environment_warns_on_single_az_database():
+    codes = {f.code for f in evaluate(PROD_SLOPPY).findings}
+    assert "ENV001" in codes
+
+
+def test_production_warns_on_shared_nat_single_node_and_spot():
+    codes = {f.code for f in evaluate(PROD_SLOPPY).findings}
+    assert {"ENV003", "ENV004", "ENV005"} <= codes
+
+
+def test_production_intent_warns_but_never_blocks():
+    # Plenty of people have one environment, call it prod, and run it cheaply.
+    # Blocking that would be wrong; saying nothing would also be wrong.
+    assert not evaluate(PROD_SLOPPY).blocked
+
+
+@pytest.mark.parametrize("name", ["prod", "production", "PROD", "Live", "prd"])
+def test_production_names_are_recognised(name):
+    answers = {**PROD_SLOPPY, "environments": ["dev", name]}
+    assert any(f.code.startswith("ENV") for f in evaluate(answers).findings)
+
+
+@pytest.mark.parametrize("name", ["dev", "staging", "test", "sandbox"])
+def test_non_production_names_are_left_alone(name):
+    answers = {**PROD_SLOPPY, "environments": [name]}
+    assert not any(f.code.startswith("ENV") for f in evaluate(answers).findings)
+
+
+def test_a_well_configured_production_environment_is_quiet():
+    answers = {
+        "stacks": ["eks", "rds"],
+        "environments": ["prod"],
+        "allowed_cidrs": ["10.1.0.0/16"],
+        "multi_az": True,
+        "az_count": 2,
+        "nat_gateway_per_az": True,
+        "node_min": 3,
+        "spot": False,
+        "backup_retention_days": 14,
+    }
+    assert not [f for f in evaluate(answers).findings if f.code.startswith("ENV")]
+
+
+def test_backup_retention_is_not_reported_twice():
+    # check_data_protection already covers it. Two findings for one problem
+    # trains people to skim the report.
+    codes = [f.code for f in evaluate({**PROD_SLOPPY, "backup_retention_days": 1}).findings]
+    assert len(codes) == len(set(codes))
+    assert "DAT002" in codes
+
+
+def test_every_production_finding_names_a_cost_or_a_consequence():
+    for f in evaluate(PROD_SLOPPY).findings:
+        if f.code.startswith("ENV"):
+            assert len(f.remedy) > 40, f.code  # not "consider hardening production"

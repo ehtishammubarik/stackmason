@@ -217,7 +217,92 @@ def estimate_cost(answers: dict) -> list[Finding]:
     return out
 
 
-ALL_CHECKS = (check_network, check_data_protection, check_state, estimate_cost)
+# Environment names that assert production intent. The name is a signal, and
+# the generator already knows whether the configuration matches it.
+PRODUCTION_NAMES = frozenset({"prod", "production", "prd", "live"})
+
+
+def check_production_intent(answers: dict) -> list[Finding]:
+    """Warn when an environment named prod is configured like a dev one.
+
+    Deliberately WARN rather than BLOCK. Plenty of people have exactly one
+    environment, call it prod, and are right to run it cheaply. Blocking that
+    would be wrong. Saying nothing, when the tool can see the mismatch, is also
+    wrong.
+
+    Every finding names the specific attribute and what it costs, because
+    "consider hardening production" is advice nobody can act on.
+    """
+    envs = {e.lower() for e in answers.get("environments", [])}
+    if not envs & PRODUCTION_NAMES:
+        return []
+
+    stacks = set(answers.get("stacks", []))
+    out: list[Finding] = []
+
+    if "rds" in stacks and not answers.get("multi_az"):
+        out.append(
+            Finding(
+                Severity.WARN,
+                "ENV001",
+                "A production environment has a single-AZ database.",
+                "Multi-AZ roughly doubles the database cost and removes the "
+                "single-AZ failure mode. If single-AZ is deliberate, record why "
+                "in DECISIONS.md so the next person does not assume it was an "
+                "oversight.",
+            )
+        )
+
+    # Backup retention in production is deliberately NOT checked here.
+    # check_data_protection already warns on it (DAT002), and two findings for
+    # one problem trains people to skim the report, which is how the findings
+    # that matter get missed.
+
+    if answers.get("az_count", 2) >= 2 and not answers.get("nat_gateway_per_az"):
+        out.append(
+            Finding(
+                Severity.WARN,
+                "ENV003",
+                "Production shares one NAT gateway across availability zones.",
+                "Losing that AZ takes outbound connectivity for every private "
+                "subnet, not just its own. One gateway per AZ costs about "
+                f"${_MONTHLY_COST['nat_gateway']:.0f} per month each.",
+            )
+        )
+
+    if "eks" in stacks and answers.get("node_min", 2) < 2:
+        out.append(
+            Finding(
+                Severity.WARN,
+                "ENV004",
+                f"Production node groups have a minimum of {answers.get('node_min')} node(s).",
+                "A single node means any node replacement is an outage, and "
+                "PodDisruptionBudgets cannot be honoured.",
+            )
+        )
+
+    if "eks" in stacks and answers.get("spot"):
+        out.append(
+            Finding(
+                Severity.WARN,
+                "ENV005",
+                "Production node groups use spot instances.",
+                "Spot capacity is reclaimed with two minutes notice. Fine for "
+                "stateless and batch work, and a source of unexplained restarts "
+                "for anything else.",
+            )
+        )
+
+    return out
+
+
+ALL_CHECKS = (
+    check_network,
+    check_data_protection,
+    check_state,
+    check_production_intent,
+    estimate_cost,
+)
 
 
 def evaluate(answers: dict) -> GuardrailReport:
