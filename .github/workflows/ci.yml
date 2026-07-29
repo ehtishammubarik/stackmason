@@ -64,6 +64,16 @@ jobs:
           JSON
           stackwright new ci-test --answers /tmp/answers.json --yes -o /tmp/gen
 
+      - name: No credential was emitted
+        # Runs BEFORE init. After init, .terraform/ contains the downloaded
+        # upstream modules, whose own examples are full of placeholder
+        # passwords. Scanning then reports theirs as ours.
+        run: |
+          if grep -rInE '(password|secret|token|auth_token)[[:space:]]*=[[:space:]]*"[^"$][^"]{4,}"' /tmp/gen; then
+            echo "::error::generator emitted a literal credential"; exit 1
+          fi
+          echo "clean: no literal credential in generated output"
+
       - name: Generated repo passes its own format check
         run: terraform -chdir=/tmp/gen fmt -check -recursive
 
@@ -75,10 +85,3 @@ jobs:
             terraform -chdir="$d" validate
             echo "::endgroup::"
           done
-
-      - name: No credential was emitted
-        run: |
-          if grep -rInE '(password|secret|token)[[:space:]]*=[[:space:]]*"[^"$][^"]{4,}"' /tmp/gen; then
-            echo "::error::generator emitted a literal credential"; exit 1
-          fi
-          echo "clean"
