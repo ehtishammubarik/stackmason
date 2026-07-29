@@ -1,6 +1,6 @@
 ---
 name: generator-safety
-description: Rules for changing what stackwright emits. Use before touching guardrails, templates, the stack registry, or anything affecting generated output. The failure mode here is not a crash, it is insecure infrastructure at other people's companies.
+description: Rules for changing what stackmason emits. Use before touching guardrails, templates, the stack registry, or anything affecting generated output. The failure mode here is not a crash, it is insecure infrastructure at other people's companies.
 allowed-tools: Bash, Read, Edit, Write, Grep, Glob
 ---
 

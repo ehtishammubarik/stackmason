@@ -1,4 +1,4 @@
-# stackwright
+# stackmason
 
 Interview-driven Terraform repositories, secure by default.
 
@@ -16,11 +16,11 @@ you would treat a change to an authentication path.
 
 | Path | Holds |
 |---|---|
-| `stackwright/guardrails.py` | What the tool refuses to emit, and why. Load-bearing |
-| `stackwright/stacks/registry.py` | The catalogue: modules, versions, questions |
-| `stackwright/interview.py` | The conversation. Transport-agnostic on purpose |
-| `stackwright/generate.py` | Answers to files, plus HCL alignment |
-| `stackwright/cli.py` | `new`, `plan`, `stacks` |
+| `stackmason/guardrails.py` | What the tool refuses to emit, and why. Load-bearing |
+| `stackmason/stacks/registry.py` | The catalogue: modules, versions, questions |
+| `stackmason/interview.py` | The conversation. Transport-agnostic on purpose |
+| `stackmason/generate.py` | Answers to files, plus HCL alignment |
+| `stackmason/cli.py` | `new`, `plan`, `stacks` |
 
 ## Non-negotiables
 
@@ -57,7 +57,7 @@ you would treat a change to an authentication path.
 ## Before you commit
 
 ```bash
-pytest && ruff check stackwright tests && ruff format --check stackwright tests
+pytest && ruff check stackmason tests && ruff format --check stackmason tests
 ```
 
 Then generate something and run real terraform against it. The test suite

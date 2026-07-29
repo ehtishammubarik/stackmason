@@ -1,9 +1,9 @@
 """Command line interface.
 
-stackwright new <project>              interactive interview
-stackwright new <project> --answers a.json --yes
-stackwright stacks                     list what is available
-stackwright plan <project> ...         show what would be written, write nothing
+stackmason new <project>              interactive interview
+stackmason new <project> --answers a.json --yes
+stackmason stacks                     list what is available
+stackmason plan <project> ...         show what would be written, write nothing
 """
 
 from __future__ import annotations
@@ -130,7 +130,7 @@ def cmd_new(args) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="stackwright",
+        prog="stackmason",
         description="Interview-driven Terraform repositories, secure by default.",
     )
     sub = p.add_subparsers(dest="command", required=True)

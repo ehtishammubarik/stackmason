@@ -5,11 +5,11 @@ import sys
 
 import pytest
 
-from stackwright.cli import main
-from stackwright.generate import align_hcl, build_plan, write
-from stackwright.guardrails import DATA_PORTS, Severity, evaluate
-from stackwright.interview import MAX_ATTEMPTS, Interview, ValidationError
-from stackwright.stacks.registry import (
+from stackmason.cli import main
+from stackmason.generate import align_hcl, build_plan, write
+from stackmason.guardrails import DATA_PORTS, Severity, evaluate
+from stackmason.interview import MAX_ATTEMPTS, Interview, ValidationError
+from stackmason.stacks.registry import (
     ALL_STACKS,
     BY_ID,
     monthly_floor,
@@ -365,9 +365,9 @@ def test_new_exits_nonzero_when_blocked(tmp_path):
 
 def test_module_is_executable():
     r = subprocess.run(
-        [sys.executable, "-m", "stackwright.cli", "--help"], capture_output=True, text=True
+        [sys.executable, "-m", "stackmason.cli", "--help"], capture_output=True, text=True
     )
-    assert r.returncode == 0 and "stackwright" in r.stdout
+    assert r.returncode == 0 and "stackmason" in r.stdout
 
 
 # -- module API correctness -------------------------------------------------

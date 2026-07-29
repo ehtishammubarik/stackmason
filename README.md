@@ -1,4 +1,4 @@
-# stackwright
+# stackmason
 
 **Answer some questions. Get a Terraform repository that is secure by default.**
 
@@ -10,7 +10,7 @@
 ## What it does
 
 ```
-$ stackwright new acme --stack eks --stack rds -e dev,staging,prod
+$ stackmason new acme --stack eks --stack rds -e dev,staging,prod
 
 Kubernetes version
   options: 1.31, 1.30, 1.29
@@ -74,21 +74,21 @@ And what it always emits:
 - A `validation` block that rejects `0.0.0.0/0` at plan time, so the rule
   survives after the generator is gone.
 
-Run `stackwright plan` to see all of it without writing a file.
+Run `stackmason plan` to see all of it without writing a file.
 
 ## Install
 
 ```bash
-pip install stackwright        # no dependencies
+pip install stackmason        # no dependencies
 ```
 
 ## Use
 
 ```bash
-stackwright stacks                          # what is available
-stackwright plan acme -s eks -s rds         # dry run, writes nothing
-stackwright new acme -s eks -s rds          # interactive
-stackwright new acme --answers a.json --yes # non-interactive, for CI
+stackmason stacks                          # what is available
+stackmason plan acme -s eks -s rds         # dry run, writes nothing
+stackmason new acme -s eks -s rds          # interactive
+stackmason new acme --answers a.json --yes # non-interactive, for CI
 ```
 
 `--yes` takes the suggestion where one exists, so the same command is
@@ -139,6 +139,18 @@ most scaffolding tools produce.
 If you want a full platform with drift detection and a control plane, look at
 Terragrunt, Atmos, or Cluster.dev. This does one thing: the first ninety
 minutes of a new infrastructure repository, without the mistakes.
+
+## Releases
+
+Published on tag. The pipeline installs the built wheel and sdist into clean
+environments and runs the suite against the **installed** package, generates a
+repository with every stack and runs `terraform validate` against the real
+upstream modules, then publishes to TestPyPI and verifies there before touching
+PyPI. Package index versions cannot be reused, so a bad publish is permanent.
+
+`scripts/verify-published.sh` verifies a release afterwards in Docker on stock
+`python:3.x-slim` images, testing what `pip install stackmason` actually
+delivers rather than an artifact CI just built.
 
 ## Testing
 

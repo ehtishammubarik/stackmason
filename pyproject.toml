@@ -3,7 +3,7 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "stackwright"
+name = "stackmason"
 version = "0.1.0"
 description = "Interview-driven Terraform repositories, secure by default."
 readme = "README.md"
@@ -27,14 +27,14 @@ dependencies = []
 dev = ["pytest>=7", "pytest-cov>=4", "ruff"]
 
 [project.scripts]
-stackwright = "stackwright.cli:main"
+stackmason = "stackmason.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/ehtishammubarik/stackwright"
-Issues = "https://github.com/ehtishammubarik/stackwright/issues"
+Homepage = "https://github.com/ehtishammubarik/stackmason"
+Issues = "https://github.com/ehtishammubarik/stackmason/issues"
 
 [tool.setuptools.packages.find]
-include = ["stackwright*"]
+include = ["stackmason*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

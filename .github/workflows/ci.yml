@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: "${{ matrix.python-version }}"
       - run: pip install -e ".[dev]"
-      - run: pytest --cov=stackwright --cov-report=term
+      - run: pytest --cov=stackmason --cov-report=term
 
   lint:
     runs-on: ubuntu-latest
@@ -26,8 +26,8 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: pip install ruff
-      - run: ruff check stackwright tests
-      - run: ruff format --check stackwright tests
+      - run: ruff check stackmason tests
+      - run: ruff format --check stackmason tests
 
   # The claim that matters: generated Terraform is valid against the real
   # upstream modules. A unit test cannot check this, because the module APIs
@@ -62,7 +62,7 @@ jobs:
             "nat_gateway_per_az": false, "enable_flow_logs": true
           }
           JSON
-          stackwright new ci-test --answers /tmp/answers.json --yes -o /tmp/gen
+          stackmason new ci-test --answers /tmp/answers.json --yes -o /tmp/gen
 
       - name: No credential was emitted
         # Runs BEFORE init. After init, .terraform/ contains the downloaded
