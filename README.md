@@ -63,6 +63,7 @@ generator knew better. So these are enforced, not suggested:
 | `skip_final_snapshot` in production | **Refuses to generate** |
 | Local state | Warns. State holds every secret the plan touched, in plaintext |
 | NAT gateway per AZ | Costs it out before you commit |
+| An environment named `prod` configured like a dev one | Warns, naming the specific attribute and what it costs |
 
 And what it always emits:
 
