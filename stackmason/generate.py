@@ -71,6 +71,71 @@ def align_hcl(text: str) -> str:
 TERRAFORM_VERSION = "~> 1.9"
 AWS_PROVIDER_VERSION = "~> 5.70"
 
+# Stacks that actually consume `allowed_cidrs`. The variable is emitted only
+# when one of these is selected, because a required variable nothing reads
+# stops `terraform plan` to ask a question with no consequence.
+CIDR_CONSUMERS = frozenset({"eks", "rds"})
+
+# The port each engine listens on. Set explicitly on both the instance and its
+# security group so the two cannot disagree: a security group opened on the
+# wrong port fails as a timeout, which is the least diagnosable failure there
+# is.
+ENGINE_PORTS: dict[str, int] = {"postgres": 5432, "mysql": 3306}
+
+# Everything the RDS module needs that cannot be derived from the engine name.
+# `family` and `major_engine_version` feed the parameter group and the option
+# group, and both are required arguments with no defaults. Omitting them fails
+# at plan time, after 62 other resources have already planned successfully, with
+# an error that names an upstream file rather than anything the user wrote.
+ENGINE_DEFAULTS: dict[str, dict[str, str]] = {
+    "postgres": {"version": "16.4", "family": "postgres16", "major_version": "16"},
+    "mysql": {"version": "8.0.39", "family": "mysql8.0", "major_version": "8.0"},
+}
+
+
+@dataclass(frozen=True, slots=True)
+class Variable:
+    """One input variable, and everything needed to document it.
+
+    `variables.tf` and `terraform.tfvars.example` are rendered from the same
+    list, so a variable cannot exist in one and be missing from the other. That
+    pairing used to be maintained by hand and was wrong: `allowed_cidrs` was
+    required, absent from the example, and consumed by nothing, so copying the
+    example and running `terraform plan` prompted for it.
+
+    `default is None` means required. A required variable needs either an
+    `example` value or, if it is a secret, an `example_note` saying where the
+    value comes from. Secrets get a note rather than a value because an example
+    credential is the credential that ships.
+    """
+
+    name: str
+    description: str
+    type: str
+    default: str | None = None
+    sensitive: bool = False
+    validation: str = ""
+    example: str | None = None
+    example_note: str = ""
+
+    @property
+    def required(self) -> bool:
+        return self.default is None
+
+    def render(self) -> str:
+        lines = [f'variable "{self.name}" {{']
+        lines.append(f'  description = "{self.description}"')
+        lines.append(f"  type        = {self.type}")
+        if self.sensitive:
+            lines.append("  sensitive   = true")
+        if self.default is not None:
+            lines.append(f"  default     = {self.default}")
+        if self.validation:
+            lines.append("")
+            lines.extend(f"  {ln}" if ln else "" for ln in self.validation.strip().split("\n"))
+        lines.append("}")
+        return "\n".join(lines) + "\n"
+
 
 @dataclass
 class Plan:
@@ -149,9 +214,21 @@ def _module_block(sid: str, answers: dict, env: str) -> str:
     lines.append(f'  {stack.name_attribute} = "${{var.project}}-${{var.environment}}-{sid}"')
 
     if sid == "vpc":
+        azs = answers.get("az_count", 2)
         lines += [
-            f'  cidr = "{answers.get("cidr", "10.0.0.0/16")}"',
-            f"  azs  = slice(data.aws_availability_zones.available.names, 0, {answers.get('az_count', 2)})",
+            "  cidr = local.vpc_cidr",
+            f"  azs  = slice(data.aws_availability_zones.available.names, 0, {azs})",
+            "",
+            "  # Subnets are not optional. The module creates one per entry, and",
+            "  # every list defaults to empty upstream, so omitting these produces",
+            "  # a VPC with no subnets and an EKS cluster with nowhere to run.",
+            "  #",
+            "  # Private gets the largest blocks: nodes and pods are what exhaust a",
+            "  # VPC. Public needs room only for NAT and load balancers, database",
+            "  # almost none. See ARCHITECTURE.md before peering this VPC.",
+            f"  private_subnets  = [for i in range({azs}) : cidrsubnet(local.vpc_cidr, 4, i)]",
+            f"  public_subnets   = [for i in range({azs}) : cidrsubnet(local.vpc_cidr, 8, 128 + i)]",
+            f"  database_subnets = [for i in range({azs}) : cidrsubnet(local.vpc_cidr, 8, 192 + i)]",
             "",
             "  enable_nat_gateway     = true",
             f"  single_nat_gateway     = {str(not answers.get('nat_gateway_per_az', False)).lower()}",
@@ -170,6 +247,20 @@ def _module_block(sid: str, answers: dict, env: str) -> str:
             "  cluster_endpoint_private_access = true",
             f"  enable_irsa                     = {str(answers.get('irsa', True)).lower()}",
             "",
+            "  # Reaching a private endpoint still requires a path to it. Without",
+            "  # this rule the cluster is private and unreachable, which people",
+            "  # fix by turning public access back on.",
+            "  cluster_security_group_additional_rules = {",
+            "    api_from_allowed_cidrs = {",
+            '      description = "Kubernetes API from the CIDRs you control"',
+            '      protocol    = "tcp"',
+            "      from_port   = 443",
+            "      to_port     = 443",
+            '      type        = "ingress"',
+            "      cidr_blocks = var.allowed_cidrs",
+            "    }",
+            "  }",
+            "",
             "  eks_managed_node_groups = {",
         ]
         for i in range(answers.get("node_group_count", 1)):
@@ -184,14 +275,30 @@ def _module_block(sid: str, answers: dict, env: str) -> str:
             ]
         lines.append("  }")
     elif sid == "rds":
+        engine = answers.get("engine", "postgres")
+        meta = ENGINE_DEFAULTS.get(engine, ENGINE_DEFAULTS["postgres"])
         lines += [
-            f'  engine         = "{answers.get("engine", "postgres")}"',
+            f'  engine         = "{engine}"',
+            f'  engine_version = "{meta["version"]}"',
             f'  instance_class = "{answers.get("instance_class", "db.m6g.large")}"',
             f"  allocated_storage = {answers.get('storage_gb', 50)}",
+            f"  port              = {ENGINE_PORTS.get(engine, 5432)}",
+            "",
+            "  # Required by the parameter group and option group the module",
+            "  # creates. Neither has a default, and both must track engine_version.",
+            f'  family               = "{meta["family"]}"',
+            f'  major_engine_version = "{meta["major_version"]}"',
             "",
             "  # Private subnets only. See guardrail NET002.",
-            "  publicly_accessible = false",
-            "  subnet_ids          = module.vpc.database_subnets",
+            "  #",
+            "  # create_db_subnet_group must be true for subnet_ids to have any",
+            "  # effect. The upstream module defaults it to false, and with no",
+            "  # subnet group the instance is created in the default VPC, which",
+            "  # is the opposite of what the line above claims.",
+            "  publicly_accessible    = false",
+            "  create_db_subnet_group = true",
+            "  subnet_ids             = module.vpc.database_subnets",
+            "  vpc_security_group_ids = [aws_security_group.rds.id]",
             "",
             f"  storage_encrypted       = {str(SECURE_DEFAULTS['storage_encrypted']).lower()}",
             f"  deletion_protection     = {str(env == 'prod').lower()}",
@@ -210,6 +317,59 @@ def _module_block(sid: str, answers: dict, env: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _locals(stacks: list[str], answers: dict) -> str:
+    """Values referenced more than once, named once.
+
+    `vpc_cidr` in particular: the subnet layout derives three lists from it, and
+    having the base range appear four times as a literal is how a VPC ends up
+    with subnets that do not sit inside it.
+    """
+    if "vpc" not in stacks:
+        return ""
+    return f'''locals {{
+  vpc_cidr = "{answers.get("cidr", "10.0.0.0/16")}"
+}}
+
+'''
+
+
+def _security_groups(stacks: list[str], answers: dict) -> str:
+    """Security groups for anything that would otherwise land on the default one.
+
+    An empty `vpc_security_group_ids` does not mean no access. It means the
+    VPC's default security group, which permits everything from anything else
+    carrying the same group. That is a wide-open lateral path presented as an
+    absence of configuration.
+    """
+    if "rds" not in stacks:
+        return ""
+    engine = answers.get("engine", "postgres")
+    port = ENGINE_PORTS.get(engine, 5432)
+    return f'''
+resource "aws_security_group" "rds" {{
+  name        = "${{var.project}}-${{var.environment}}-rds"
+  description = "Database ingress, restricted to var.allowed_cidrs"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {{
+    description = "{engine} from the CIDRs you control"
+    from_port   = {port}
+    to_port     = {port}
+    protocol    = "tcp"
+    cidr_blocks = var.allowed_cidrs
+  }}
+
+  # No egress block, deliberately. Terraform revokes the default allow-all
+  # egress rule when none is declared, and a database has no reason to open
+  # connections outbound.
+
+  lifecycle {{
+    create_before_destroy = true
+  }}
+}}
+'''
+
+
 def build_plan(
     root: Path, project: str, stacks: list[str], environments: list[str], answers: dict
 ) -> Plan:
@@ -221,21 +381,20 @@ def build_plan(
     for env in environments:
         base = f"environments/{env}"
         modules = "\n".join(_module_block(s, answers, env) for s in resolved)
+        variables = _variables(resolved, project, env)
         plan.files[f"{base}/main.tf"] = (
             f"# {project} :: {env}\n"
             f"# Generated by stackmason. Edit freely; this is your repository now.\n\n"
             'data "aws_availability_zones" "available" {\n'
-            '  state = "available"\n}\n\n' + modules
+            '  state = "available"\n}\n\n'
+            + _locals(resolved, answers)
+            + modules
+            + _security_groups(resolved, answers)
         )
         plan.files[f"{base}/versions.tf"] = _versions_tf()
         plan.files[f"{base}/backend.tf"] = _backend_tf(env, project)
-        plan.files[f"{base}/variables.tf"] = _variables_tf(resolved, project, env)
-        plan.files[f"{base}/terraform.tfvars.example"] = (
-            f'project     = "{project}"\n'
-            f'environment = "{env}"\n'
-            "# db_password is deliberately absent. Supply it from a secret manager:\n"
-            "#   TF_VAR_db_password=$(aws secretsmanager get-secret-value ...) terraform apply\n"
-        )
+        plan.files[f"{base}/variables.tf"] = _variables_tf(variables)
+        plan.files[f"{base}/terraform.tfvars.example"] = _tfvars_example(variables)
 
     plan.files["README.md"] = _readme(project, resolved, environments, merged)
     plan.files["ARCHITECTURE.md"] = _architecture(project, resolved, environments, merged)
@@ -251,39 +410,95 @@ def build_plan(
     return plan
 
 
-def _variables_tf(stacks: list[str], project: str, env: str) -> str:
-    out = f'''variable "project" {{
-  description = "Name prefix for every resource."
-  type        = string
-  default     = "{project}"
-}}
+def _variables(stacks: list[str], project: str, env: str) -> list[Variable]:
+    """Every variable this environment declares.
 
-variable "environment" {{
-  description = "Environment name, used in resource names and tags."
-  type        = string
-  default     = "{env}"
-}}
+    Single source of truth for `variables.tf` and `terraform.tfvars.example`.
+    """
+    out = [
+        Variable(
+            "project",
+            "Name prefix for every resource.",
+            "string",
+            default=f'"{project}"',
+            example=f'"{project}"',
+        ),
+        Variable(
+            "environment",
+            "Environment name, used in resource names and tags.",
+            "string",
+            default=f'"{env}"',
+            example=f'"{env}"',
+        ),
+    ]
 
-variable "allowed_cidrs" {{
-  description = "CIDRs permitted to reach private services. Never 0.0.0.0/0."
-  type        = list(string)
+    if CIDR_CONSUMERS & set(stacks):
+        out.append(
+            Variable(
+                "allowed_cidrs",
+                "CIDRs permitted to reach private services. Never 0.0.0.0/0.",
+                "list(string)",
+                validation="""validation {
+  condition     = !contains(var.allowed_cidrs, "0.0.0.0/0")
+  error_message = "A private service must not be reachable from the internet."
+}""",
+                # A documentation-only range from RFC 5737. Deliberately not a
+                # working value: if it is left unedited, access fails closed
+                # instead of quietly admitting something.
+                example='["203.0.113.0/24"]',
+            )
+        )
 
-  validation {{
-    condition     = !contains(var.allowed_cidrs, "0.0.0.0/0")
-    error_message = "A private service must not be reachable from the internet."
-  }}
-}}
-'''
     if "rds" in stacks:
-        out += """
-variable "db_password" {
-  description = "Database master password, supplied at apply time from a secret manager."
-  type        = string
-  sensitive   = true
-  # No default. A default is what ends up committed.
-}
-"""
+        out.append(
+            Variable(
+                "db_password",
+                "Database master password, supplied at apply time from a secret manager.",
+                "string",
+                sensitive=True,
+                example_note=(
+                    "db_password is deliberately absent. A default is what ends up "
+                    "committed.\nSupply it at apply time:\n"
+                    "  TF_VAR_db_password=$(aws secretsmanager get-secret-value \\\n"
+                    f"    --secret-id {project}/db --query SecretString --output text)"
+                ),
+            )
+        )
     return out
+
+
+def _variables_tf(variables: list[Variable]) -> str:
+    return "\n".join(v.render() for v in variables)
+
+
+def _tfvars_example(variables: list[Variable]) -> str:
+    """The example file, rendered so that copying it is enough to plan.
+
+    Enforced rather than trusted: a required variable with neither an example
+    value nor a note explaining where its value comes from raises here, at
+    generation time, rather than surfacing as an interactive prompt in
+    somebody's CI job.
+    """
+    lines = [
+        "# Copy to terraform.tfvars and edit. terraform.tfvars is gitignored.",
+        "# Every variable without a default appears below, so a copy of this file",
+        "# is enough to run terraform plan without being prompted.",
+        "",
+    ]
+    for v in variables:
+        if v.example is not None:
+            lines.append(f"# {v.description}")
+            lines.append(f"{v.name} = {v.example}")
+            lines.append("")
+        elif v.required:
+            if not v.example_note:
+                raise RuntimeError(
+                    f"variable {v.name!r} is required but has no example and no note; "
+                    "terraform plan would prompt for it"
+                )
+            lines.extend(f"# {ln}" if ln else "#" for ln in v.example_note.split("\n"))
+            lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _gitignore() -> str:
@@ -420,6 +635,36 @@ recorded in [DECISIONS.md](DECISIONS.md).
 """
 
 
+def _address_plan(stacks: list[str], answers: dict) -> str:
+    """The subnet layout, written down.
+
+    Whoever peers this VPC later needs to know what was reserved, and reading
+    it back out of `cidrsubnet` calls is not a reasonable thing to ask of them.
+    """
+    if "vpc" not in stacks:
+        return ""
+    cidr = answers.get("cidr", "10.0.0.0/16")
+    azs = answers.get("az_count", 2)
+    return f"""
+## Address plan
+
+Base range `{cidr}`, divided across {azs} availability zone(s):
+
+| Tier | Size | Index | Holds |
+|---|---|---|---|
+| private | `/20` per AZ | from 0 | Nodes and pods. The largest blocks, because pod density is what exhausts a VPC |
+| public | `/24` per AZ | from 128 | NAT gateways and load balancers only |
+| database | `/24` per AZ | from 192 | Subnet group members. Almost nothing |
+
+The gap between the tiers is deliberate: private can grow to six AZs without
+reaching the public range.
+
+Ranges are computed with `cidrsubnet` from `local.vpc_cidr`, so changing the
+base range moves all three together. Below roughly a `/20` base the split does
+not fit and `cidrsubnet` fails at plan time, which is the correct outcome.
+"""
+
+
 def _architecture(project: str, stacks: list[str], envs: list[str], answers: dict) -> str:
     per_stack = "\n\n".join(
         f"### {BY_ID[s].name}\n\n{BY_ID[s].summary}\n\n"
@@ -441,7 +686,7 @@ environments/
 One directory per environment, each with its own state. Environments do not
 share state, so a mistake in dev cannot destroy prod, and `terraform apply` in
 one cannot be run against the other by accident.
-
+{_address_plan(stacks, answers)}
 ## Stacks
 
 {per_stack}
