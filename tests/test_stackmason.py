@@ -1,7 +1,10 @@
+import ipaddress
+import itertools
 import json
 import re
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -249,7 +252,12 @@ def test_production_gets_deletion_protection_and_dev_does_not(tmp_path):
 def test_database_is_never_publicly_accessible(tmp_path):
     plan = build_plan(tmp_path, "acme", ["rds"], ["dev", "prod"], BASE)
     for env in ("dev", "prod"):
-        assert "publicly_accessible = false" in plan.files[f"environments/{env}/main.tf"]
+        # Matched on the assignment rather than an exact string: `=` alignment
+        # shifts with the longest key in the surrounding run, so any new
+        # neighbouring argument silently changes the spacing.
+        assert re.search(
+            r"^\s+publicly_accessible\s+= false$", plan.files[f"environments/{env}/main.tf"], re.M
+        )
 
 
 def test_eks_endpoint_is_private_by_default(tmp_path):
@@ -271,7 +279,11 @@ def test_gitignore_covers_state_and_tfvars(tmp_path):
 
 
 def test_cidr_validation_block_is_emitted(tmp_path):
-    plan = build_plan(tmp_path, "acme", ["vpc"], ["dev"], BASE)
+    # Emitted alongside a stack that consumes the variable. A VPC on its own no
+    # longer declares allowed_cidrs, because nothing in it reads one, and a
+    # required variable nobody reads stops `plan` to ask a question with no
+    # consequence. See #7.
+    plan = build_plan(tmp_path, "acme", ["eks"], ["dev"], BASE)
     assert 'contains(var.allowed_cidrs, "0.0.0.0/0")' in plan.files["environments/dev/variables.tf"]
 
 
@@ -474,3 +486,154 @@ def test_every_production_finding_names_a_cost_or_a_consequence():
     for f in evaluate(PROD_SLOPPY).findings:
         if f.code.startswith("ENV"):
             assert len(f.remedy) > 40, f.code  # not "consider hardening production"
+
+
+# -- generated repository invariants ----------------------------------------
+#
+# Everything below asserts a property of the emitted Terraform rather than of
+# the Python that emitted it. `terraform validate` cannot see any of these:
+# an empty subnet list, an inert subnet group, and a variable nobody reads are
+# all type-correct. Three separate defects of that shape shipped before these
+# existed (#7, #11, #12), so the gate is the point, not the individual asserts.
+
+
+def _env(stacks, answers=None, env="prod"):
+    plan = build_plan(Path("/tmp/x"), "acme", stacks, [env], answers or BASE)
+    return (
+        plan.files[f"environments/{env}/main.tf"],
+        plan.files[f"environments/{env}/variables.tf"],
+        plan.files[f"environments/{env}/terraform.tfvars.example"],
+    )
+
+
+def _declared_variables(variables_tf):
+    """Variable names, and whether each has a default."""
+    out = {}
+    for block in re.finditer(r'variable "(\w+)" \{(.*?)\n\}', variables_tf, re.S):
+        out[block.group(1)] = "default" in block.group(2)
+    return out
+
+
+def test_copying_the_example_is_enough_to_plan_without_a_prompt():
+    # The defect in #7: a required variable absent from the example turns
+    # `terraform plan -input=false` into a hard failure in CI.
+    for stacks in (["vpc"], ["eks"], ["rds"], ["eks", "rds"], ["s3"]):
+        _, variables_tf, example = _env(stacks)
+        for name, has_default in _declared_variables(variables_tf).items():
+            if has_default:
+                continue
+            assigned = re.search(rf"^{name}\s*=", example, re.M)
+            mentioned = name in example
+            assert assigned or mentioned, (
+                f"{stacks}: {name} is required but the example neither sets it "
+                "nor says where its value comes from"
+            )
+
+
+def test_no_secret_is_assigned_a_value_in_the_example():
+    # A required secret must be mentioned, never assigned. An example
+    # credential is the credential that ships.
+    _, _, example = _env(["rds"])
+    assert "db_password" in example
+    assert not re.search(r"^db_password\s*=", example, re.M)
+
+
+def test_a_required_variable_with_no_example_and_no_note_is_refused():
+    from stackmason.generate import Variable, _tfvars_example
+
+    with pytest.raises(RuntimeError, match="terraform plan would prompt"):
+        _tfvars_example([Variable("orphan", "no example, no note", "string")])
+
+
+def test_allowed_cidrs_is_emitted_only_when_something_consumes_it():
+    _, vars_without, _ = _env(["s3"])
+    assert "allowed_cidrs" not in vars_without
+
+    for stacks in (["eks"], ["rds"]):
+        _, vars_with, _ = _env(stacks)
+        assert "allowed_cidrs" in vars_with, stacks
+
+
+def test_allowed_cidrs_is_actually_referenced_by_a_resource():
+    # #7: the variable carried a validation block forbidding 0.0.0.0/0 while
+    # reaching nothing. A guardrail that cannot fire is worse than an absent
+    # one, because it gets counted in a review.
+    for stacks in (["eks"], ["rds"]):
+        main_tf, variables_tf, _ = _env(stacks)
+        assert "allowed_cidrs" in variables_tf, stacks
+        assert "var.allowed_cidrs" in main_tf, stacks
+
+
+def test_every_subnet_list_consumed_is_also_defined():
+    # #12: private_subnets and database_subnets were read twice and never set,
+    # so both resolved to [] and every generated repo failed at apply.
+    main_tf, _, _ = _env(["eks", "rds"])
+    consumed = set(re.findall(r"module\.vpc\.(\w*subnets)", main_tf))
+    assert consumed, "expected the generated repo to consume subnet outputs"
+    for name in consumed:
+        assert re.search(rf"^\s+{name}\s*=", main_tf, re.M), (
+            f"module.vpc.{name} is consumed but never defined on the vpc module"
+        )
+
+
+@pytest.mark.parametrize("az_count", [1, 2, 3, 6])
+def test_subnet_ranges_do_not_overlap(az_count):
+    # Computed here rather than trusted from the template, because an
+    # overlapping plan fails at apply with a message about the second subnet,
+    # not about the layout.
+    base = ipaddress.ip_network("10.0.0.0/16")
+    private = [list(base.subnets(prefixlen_diff=4))[i] for i in range(az_count)]
+    public = [list(base.subnets(prefixlen_diff=8))[128 + i] for i in range(az_count)]
+    database = [list(base.subnets(prefixlen_diff=8))[192 + i] for i in range(az_count)]
+
+    everything = private + public + database
+    for a, b in itertools.combinations(everything, 2):
+        assert not a.overlaps(b), f"{a} overlaps {b} at az_count={az_count}"
+    for net in everything:
+        assert net.subnet_of(base)
+
+
+def test_database_lands_in_the_vpc_not_the_default_one():
+    # #11: subnet_ids is inert unless create_db_subnet_group is true, and
+    # without a subnet group the instance is created in the default VPC.
+    main_tf, _, _ = _env(["rds"])
+    rds = main_tf[main_tf.index('module "rds"') :].split("\n}")[0]
+    assert "create_db_subnet_group = true" in rds
+    assert "module.vpc.database_subnets" in rds
+
+
+def test_database_gets_its_own_security_group_not_the_default():
+    # An empty vpc_security_group_ids means the VPC default group, which
+    # permits everything from anything else carrying it.
+    main_tf, _, _ = _env(["rds"])
+    assert 'resource "aws_security_group" "rds"' in main_tf
+    assert "vpc_security_group_ids = [aws_security_group.rds.id]" in main_tf
+
+    sg = main_tf[main_tf.index('resource "aws_security_group" "rds"') :]
+    assert "cidr_blocks = var.allowed_cidrs" in sg
+    assert "0.0.0.0/0" not in sg
+
+
+@pytest.mark.parametrize(("engine", "port"), [("postgres", 5432), ("mysql", 3306)])
+def test_the_security_group_port_matches_the_engine(engine, port):
+    # A security group opened on the wrong port fails as a timeout, which is
+    # the least diagnosable failure there is.
+    main_tf, _, _ = _env(["rds"], {**BASE, "engine": engine})
+    assert f"port              = {port}" in main_tf
+    sg = main_tf[main_tf.index('resource "aws_security_group" "rds"') :]
+    assert f"from_port   = {port}" in sg
+    assert f"to_port     = {port}" in sg
+
+
+def test_rds_sets_the_arguments_its_parameter_group_requires():
+    # family and major_engine_version have no defaults upstream. Omitting them
+    # planned 62 resources successfully and then failed on the 63rd.
+    main_tf, _, _ = _env(["rds"])
+    for arg in ("engine_version", "family", "major_engine_version"):
+        assert re.search(rf"^\s+{arg}\s*=", main_tf, re.M), arg
+
+
+def test_no_generated_terraform_leaks_a_credential():
+    main_tf, variables_tf, example = _env(["eks", "rds"])
+    for blob in (main_tf, variables_tf, example):
+        assert not re.search(r'password\s*=\s*"[^"$]', blob)
