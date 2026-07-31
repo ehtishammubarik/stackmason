@@ -172,3 +172,12 @@ passes the CI it ships with on its first commit rather than failing it.
 ## License
 
 MIT.
+
+---
+
+If `stackmason` saved you the first ninety minutes of an infrastructure repo, a
+star helps the next person find it. Contributions welcome:
+[`good first issue`](https://github.com/ehtishammubarik/stackmason/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
+is pre-scoped, and [CONTRIBUTING.md](CONTRIBUTING.md) says how to claim one so
+two people do not build it twice. Read the `terraform validate` section first if
+you are touching what gets emitted.
