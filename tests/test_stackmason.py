@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from stackmason.cli import main
-from stackmason.generate import align_hcl, build_plan, write
+from stackmason.generate import DEFAULT_REGION, align_hcl, build_plan, write
 from stackmason.guardrails import DATA_PORTS, Severity, evaluate
 from stackmason.interview import MAX_ATTEMPTS, Interview, ValidationError
 from stackmason.stacks.registry import (
@@ -637,3 +637,75 @@ def test_no_generated_terraform_leaks_a_credential():
     main_tf, variables_tf, example = _env(["eks", "rds"])
     for blob in (main_tf, variables_tf, example):
         assert not re.search(r'password\s*=\s*"[^"$]', blob)
+
+
+# -- provider, region, and tags ---------------------------------------------
+
+
+def test_every_environment_configures_its_provider():
+    # Without a provider block the region comes from AWS_REGION, an active
+    # profile, or nothing, while backend.tf hardcodes one. See #8.
+    plan = build_plan(Path("/tmp/x"), "acme", ["vpc"], ["dev", "prod"], BASE)
+    for env in ("dev", "prod"):
+        providers = plan.files[f"environments/{env}/providers.tf"]
+        assert 'provider "aws"' in providers
+        assert "region = var.aws_region" in providers
+
+
+@pytest.mark.parametrize("region", ["us-east-1", "eu-west-1", "ap-southeast-2"])
+def test_backend_region_and_provider_region_cannot_diverge(region):
+    # The failure this prevents is silent: state in one region, resources in
+    # another, and a plan that wants to destroy everything when the next person
+    # runs it from a different shell.
+    plan = build_plan(Path("/tmp/x"), "acme", ["vpc"], ["prod"], {**BASE, "aws_region": region})
+    backend = plan.files["environments/prod/backend.tf"]
+    variables = plan.files["environments/prod/variables.tf"]
+
+    declared = re.search(r'variable "aws_region".*?default\s*=\s*"([^"]+)"', variables, re.S)
+    in_backend = re.search(r'^\s+region\s+=\s+"([^"]+)"', backend, re.M)
+    assert declared and in_backend
+    assert declared.group(1) == in_backend.group(1) == region
+
+
+def test_region_defaults_are_consistent_when_nothing_is_asked():
+    plan = build_plan(Path("/tmp/x"), "acme", ["vpc"], ["dev"], BASE)
+    assert f'"{DEFAULT_REGION}"' in plan.files["environments/dev/variables.tf"]
+    assert f'region         = "{DEFAULT_REGION}"' in plan.files["environments/dev/backend.tf"]
+
+
+def test_default_tags_carry_project_environment_and_owner():
+    # Untagged infrastructure is the most common reason a cloud bill cannot be
+    # explained, and the generator already knows all three values.
+    plan = build_plan(Path("/tmp/x"), "acme", ["vpc"], ["prod"], BASE)
+    providers = plan.files["environments/prod/providers.tf"]
+    assert "default_tags" in providers
+    for tag in ("Project", "Environment", "ManagedBy"):
+        assert re.search(rf"^\s+{tag}\s+=", providers, re.M), tag
+    assert 'ManagedBy   = "terraform"' in providers
+
+
+def test_providers_file_is_already_formatted():
+    plan = build_plan(Path("/tmp/x"), "acme", ["vpc"], ["prod"], BASE)
+    providers = plan.files["environments/prod/providers.tf"]
+    assert align_hcl(providers) == providers
+
+
+def test_region_flag_reaches_the_generated_repository(tmp_path):
+    out = tmp_path / "repo"
+    main(
+        [
+            "new",
+            "acme",
+            "-s",
+            "vpc",
+            "-e",
+            "dev",
+            "-o",
+            str(out),
+            "--region",
+            "ap-south-1",
+            "--yes",
+        ]
+    )
+    assert 'region         = "ap-south-1"' in (out / "environments/dev/backend.tf").read_text()
+    assert '"ap-south-1"' in (out / "environments/dev/variables.tf").read_text()

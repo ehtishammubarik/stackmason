@@ -33,7 +33,7 @@ Out comes a repository, not a snippet:
 
 ```
 acme/
-  environments/dev/      main.tf  versions.tf  backend.tf  variables.tf
+  environments/dev/      main.tf  versions.tf  providers.tf  backend.tf  variables.tf
   environments/staging/
   environments/prod/
   .github/workflows/terraform.yml
@@ -43,9 +43,14 @@ acme/
   .gitignore
 ```
 
-One state file per environment. Providers pinned. CI that checks formatting and
+One state file per environment. Providers pinned and configured with an explicit
+region, never one inherited from whichever shell happens to run it. Every
+resource tagged with its project and environment. CI that checks formatting and
 scans for credentials. `terraform validate` passes against the real upstream
 modules, which is verified in this repo's own tests.
+
+Pass `--region` to put both the resources and the state bucket somewhere other
+than `us-east-1`.
 
 ## Why not just copy a blog post
 
