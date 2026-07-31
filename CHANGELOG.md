@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### Added
+
+- **A `provider "aws"` block in every environment, with an explicit region**
+  ([#8]). There was none. The provider took its region from `AWS_REGION`, an
+  active profile, or nothing, while `backend.tf` hardcoded `us-east-1` and
+  nothing checked that the two agreed. `AWS_REGION=eu-west-1 terraform apply`
+  wrote state to Virginia and built the VPC in Ireland, successfully and
+  silently, until the next person ran it from a different shell and got a plan
+  that wanted to destroy everything.
+- `default_tags` carrying `Project`, `Environment`, `ManagedBy`, and
+  `Repository`. Untagged infrastructure is the most common reason a cloud bill
+  cannot be explained, and the generator already knew every one of these values:
+  it puts them in each resource name.
+- `--region` on `new` and `plan`, and `aws_region` in an answers file. Both set
+  the provider and the state bucket together, since they are generated from one
+  value and a test asserts they match.
+
 ### Fixed
 
 Four defects that shared one cause: the generated Terraform was checked with
@@ -44,6 +61,7 @@ A generated `eks` + `rds` repository now plans cleanly: **64 resources to add,
 0 to change, 0 to destroy**.
 
 [#7]: https://github.com/ehtishammubarik/stackmason/issues/7
+[#8]: https://github.com/ehtishammubarik/stackmason/issues/8
 [#11]: https://github.com/ehtishammubarik/stackmason/issues/11
 [#12]: https://github.com/ehtishammubarik/stackmason/issues/12
 

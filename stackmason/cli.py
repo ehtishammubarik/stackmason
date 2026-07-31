@@ -13,7 +13,7 @@ import json
 import sys
 from pathlib import Path
 
-from .generate import build_plan, write
+from .generate import DEFAULT_REGION, build_plan, write
 from .interview import Interview, ValidationError, render_question
 from .stacks.registry import ALL_STACKS, monthly_floor
 
@@ -53,7 +53,20 @@ def _collect(args) -> tuple[list[str], list[str], dict]:
         )
     else:
         iv.run(_ask)
-    return iv.stacks, envs, {**iv.answers, "_reasons": iv.reasons}
+
+    # An explicit --region wins over one in an answers file, since it was typed
+    # for this run. Neither is asked interactively yet: the interview is driven
+    # by per-stack questions and region belongs to none of them.
+    region = args.region if args.region != DEFAULT_REGION else answers.get("aws_region")
+    return (
+        iv.stacks,
+        envs,
+        {
+            **iv.answers,
+            "aws_region": region or DEFAULT_REGION,
+            "_reasons": iv.reasons,
+        },
+    )
 
 
 def cmd_stacks(args) -> int:
@@ -148,6 +161,13 @@ def build_parser() -> argparse.ArgumentParser:
             "-e", "--environments", default="dev,prod", help="comma separated (default: dev,prod)"
         )
         c.add_argument("-o", "--output", help="output directory (default: ./<project>)")
+        c.add_argument(
+            "-r",
+            "--region",
+            default=DEFAULT_REGION,
+            help=f"AWS region for both the resources and the state bucket "
+            f"(default: {DEFAULT_REGION})",
+        )
         c.add_argument("--answers", help="JSON file of answers, for non-interactive use")
         c.add_argument(
             "--yes", action="store_true", help="take suggestions and defaults without asking"
