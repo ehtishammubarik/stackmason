@@ -175,7 +175,13 @@ delivers rather than an artifact CI just built.
 pip install -e ".[dev]" && pytest
 ```
 
-57 tests, 88% coverage, no network and no cloud credentials required.
+No network and no cloud credentials required. CI enforces a coverage floor of
+88% on Python 3.10, 3.11, and 3.12, so that figure is a gate rather than a
+claim: it cannot be true here and false in the repository.
+
+There is deliberately no test count in this file. The last one said 57 when the
+suite was 96, and a number nobody maintains is worse than no number, because it
+gives the reader no way to tell which of the other claims here are also stale.
 
 Generated output is checked to be `terraform fmt` clean, so a generated repo
 passes the CI it ships with on its first commit rather than failing it.

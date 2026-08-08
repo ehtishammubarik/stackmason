@@ -17,7 +17,7 @@ jobs:
         with:
           python-version: "${{ matrix.python-version }}"
       - run: pip install -e ".[dev]"
-      - run: pytest --cov=stackmason --cov-report=term
+      - run: pytest --cov=stackmason --cov-report=term --cov-fail-under=88
 
   lint:
     runs-on: ubuntu-latest
