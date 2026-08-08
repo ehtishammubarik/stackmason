@@ -356,7 +356,23 @@ def _module_block(sid: str, answers: dict, env: str) -> str:
             "  password = var.db_password",
         ]
     else:
-        lines.append("  # Configure per the module documentation linked in ARCHITECTURE.md")
+        # Say what this is. The previous comment read like an optional next
+        # step, so the block looked finished: it has a source, a version, and a
+        # name, and `terraform validate` agrees. Every argument the module needs
+        # defaults to null or [] upstream, so nothing objects until apply
+        # reaches the AWS API. Tracked in issue #10.
+        lines += [
+            "  # INCOMPLETE. This block will NOT apply.",
+            "  #",
+            "  # stackmason does not yet configure this stack. What is above is a",
+            "  # module reference and a name. Every required argument is missing,",
+            "  # and each one defaults to null or [] upstream, which is why",
+            "  # terraform validate reports success on a configuration that",
+            "  # cannot create anything.",
+            "  #",
+            "  # Fill this in against the module documentation linked in",
+            "  # ARCHITECTURE.md before applying.",
+        ]
 
     lines.append("}")
     return "\n".join(lines) + "\n"
@@ -422,7 +438,7 @@ def build_plan(
     resolved = resolve_dependencies(stacks)
     region = str(answers.get("aws_region") or DEFAULT_REGION)
     merged = {**answers, "stacks": resolved, "environments": environments, "aws_region": region}
-    plan = Plan(root, resolved, environments, merged, guardrails=evaluate(merged))
+    plan = Plan(root, resolved, environments, merged, guardrails=evaluate(merged, resolved))
 
     for env in environments:
         base = f"environments/{env}"

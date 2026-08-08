@@ -709,3 +709,99 @@ def test_region_flag_reaches_the_generated_repository(tmp_path):
     )
     assert 'region         = "ap-south-1"' in (out / "environments/dev/backend.tf").read_text()
     assert '"ap-south-1"' in (out / "environments/dev/variables.tf").read_text()
+
+
+# --------------------------------------------------------------------------
+# Stack completeness (issue #10)
+#
+# Six of nine stacks emit a module reference and a name and nothing else.
+# `terraform validate` accepts that, because every argument they omit has a
+# null or empty default upstream, so CI passed on repositories that could not
+# apply. The `configured` flag records which stacks are real. These tests exist
+# so the flag cannot drift away from what the generator actually emits, which
+# is the only thing that makes it worth trusting.
+# --------------------------------------------------------------------------
+
+
+def _module_body(stack_id: str) -> str:
+    """The generated `module "<id>" { ... }` block, braces excluded."""
+    answers = {**BASE, "engine": "postgres"}
+    plan = build_plan(Path("/x"), "acme", [stack_id], ["dev"], answers)
+    main_tf = plan.files["environments/dev/main.tf"]
+    start = main_tf.index(f'module "{stack_id}" {{')
+    body = main_tf[start:]
+    return body[: body.index("\n}\n")]
+
+
+@pytest.mark.parametrize("stack", [s for s in ALL_STACKS if s.configured], ids=lambda s: s.id)
+def test_a_stack_claiming_to_be_configured_emits_real_arguments(stack):
+    """`configured=True` must be earned, not asserted.
+
+    A stub block still contains a source, a version, and a name attribute, so
+    counting lines proves nothing. Count the arguments that are not any of
+    those. Flipping the flag on an unimplemented stack fails here.
+    """
+    body = _module_body(stack.id)
+    args = [
+        ln.strip()
+        for ln in body.splitlines()
+        if "=" in ln
+        and not ln.strip().startswith("#")
+        and not ln.strip().startswith("source")
+        and not ln.strip().startswith("version")
+        and not ln.strip().startswith(stack.name_attribute)
+    ]
+    assert args, f"{stack.id} claims configured=True but emits no arguments beyond its name"
+
+
+@pytest.mark.parametrize("stack", [s for s in ALL_STACKS if not s.configured], ids=lambda s: s.id)
+def test_an_unconfigured_stack_says_so_in_the_generated_file(stack):
+    """The stub has to announce itself where someone will actually read it.
+
+    Not in the docs, not in the CLI they ran ten minutes ago: in the file they
+    are about to commit and apply.
+    """
+    body = _module_body(stack.id)
+    assert "INCOMPLETE" in body
+    assert "will NOT apply" in body
+
+
+def test_selecting_a_stub_stack_warns_rather_than_generating_silently():
+    report = evaluate({**BASE, "stacks": ["vpc", "msk"]}, ["vpc", "msk"])
+    warns = [f for f in report.by_severity(Severity.WARN) if f.code == "GEN001"]
+    assert len(warns) == 1
+    assert "msk" in warns[0].message
+    assert "vpc" not in warns[0].message
+
+
+def test_a_fully_configured_selection_produces_no_completeness_warning():
+    report = evaluate({**BASE, "stacks": ["vpc", "eks"]}, ["vpc", "eks"])
+    assert not [f for f in report.findings if f.code == "GEN001"]
+
+
+def test_the_completeness_warning_reaches_the_generated_decisions_file(tmp_path):
+    """A warning nobody reads is not a warning.
+
+    DECISIONS.md outlives the terminal session that produced it, which is the
+    point of writing it down.
+    """
+    out = tmp_path / "repo"
+    main(["new", "acme", "-s", "vpc", "-s", "alb", "-e", "dev", "-o", str(out), "--yes"])
+    assert "GEN001" in (out / "DECISIONS.md").read_text()
+
+
+def test_stacks_listing_marks_the_stubs(capsys):
+    main(["stacks"])
+    out = capsys.readouterr().out
+    for stack in ALL_STACKS:
+        line = next(ln for ln in out.splitlines() if ln.strip().startswith(stack.id + " "))
+        assert ("[stub]" in line) is not stack.configured, (
+            f"{stack.id}: listing marker disagrees with configured={stack.configured}"
+        )
+
+
+def test_generated_output_still_formats_cleanly_with_a_stub_present():
+    """The stub comment block is emitted inside a module body, so it goes
+    through the same alignment path as real arguments."""
+    body = _module_body("s3")
+    assert align_hcl(body) == body

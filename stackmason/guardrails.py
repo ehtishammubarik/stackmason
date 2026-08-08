@@ -305,11 +305,54 @@ ALL_CHECKS = (
 )
 
 
-def evaluate(answers: dict) -> GuardrailReport:
-    """Run every guardrail. Never short circuits, so the report is complete."""
+def check_stack_completeness(stacks: list[str]) -> list[Finding]:
+    """Warn when a selected stack emits a module block that cannot apply.
+
+    Unlike every other check here, this one is about the generator rather than
+    the user's answers. It exists because the failure it describes is invisible
+    at the only point most people look.
+
+    An unconfigured stack emits its module reference and a name. Every argument
+    it omits has a null or empty default upstream, so `terraform validate`
+    reports success, the generated CI passes, and the configuration fails at the
+    AWS API during apply. That is the most expensive place to discover it and
+    the furthest from the person who ran the generator.
+
+    Taking the signature as stack ids rather than `answers` is deliberate: this
+    is a property of what was selected, not of what was answered, and routing it
+    through `answers` would make it look like something the user could change.
+    """
+    from .stacks.registry import BY_ID
+
+    incomplete = [s for s in stacks if s in BY_ID and not BY_ID[s].configured]
+    if not incomplete:
+        return []
+    listed = ", ".join(sorted(incomplete))
+    return [
+        Finding(
+            Severity.WARN,
+            "GEN001",
+            f"{listed}: module block is a stub, not a working configuration",
+            "terraform validate will pass and apply will fail at the AWS API. "
+            "Fill these in against the module documentation in ARCHITECTURE.md "
+            "before applying, or generate without them. Tracked in "
+            "https://github.com/ehtishammubarik/stackmason/issues/10",
+        )
+    ]
+
+
+def evaluate(answers: dict, stacks: list[str] | None = None) -> GuardrailReport:
+    """Run every guardrail. Never short circuits, so the report is complete.
+
+    `stacks` is optional so existing callers keep working, but generation always
+    passes it. Without it the completeness check cannot run and a stub stack
+    goes unreported, which is the whole defect this guards against.
+    """
     report = GuardrailReport()
     for check in ALL_CHECKS:
         report.findings.extend(check(answers))
+    if stacks:
+        report.findings.extend(check_stack_completeness(stacks))
     return report
 
 

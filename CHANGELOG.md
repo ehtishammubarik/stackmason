@@ -4,6 +4,19 @@
 
 ### Added
 
+- **Stub stacks now say so, everywhere someone might look** ([#10]). Six of the
+  nine advertised stacks emit a module reference and a name and nothing else.
+  `terraform validate` accepts that, because every argument they omit defaults
+  to null or `[]` upstream, so the generated CI passed and apply failed at the
+  AWS API. Nothing said which three were real. Now `stackmason stacks` marks
+  them `[stub]`, selecting one raises a `GEN001` warning in the plan output and
+  in `DECISIONS.md`, and the emitted block opens with `INCOMPLETE. This block
+  will NOT apply.` instead of a comment that read like an optional next step.
+  A `configured` flag on each registry entry records which is which, and the
+  test suite asserts it against the generated output, so it cannot be set on a
+  stack that has not actually been implemented. The six stacks are still stubs;
+  this change is about not pretending otherwise.
+
 - **A `provider "aws"` block in every environment, with an explicit region**
   ([#8]). There was none. The provider took its region from `AWS_REGION`, an
   active profile, or nothing, while `backend.tf` hardcoded `us-east-1` and
@@ -62,6 +75,7 @@ A generated `eks` + `rds` repository now plans cleanly: **64 resources to add,
 
 [#7]: https://github.com/ehtishammubarik/stackmason/issues/7
 [#8]: https://github.com/ehtishammubarik/stackmason/issues/8
+[#10]: https://github.com/ehtishammubarik/stackmason/issues/10
 [#11]: https://github.com/ehtishammubarik/stackmason/issues/11
 [#12]: https://github.com/ehtishammubarik/stackmason/issues/12
 

@@ -102,17 +102,28 @@ reproducible in a pipeline.
 
 ## Stacks
 
-| Stack | What | From |
-|---|---|---|
-| `vpc` | Subnets, routing, NAT, flow logs | `terraform-aws-modules/vpc/aws` |
-| `eks` | Control plane, node groups, IRSA | `terraform-aws-modules/eks/aws` |
-| `rds` | PostgreSQL or MySQL, private, encrypted | `terraform-aws-modules/rds/aws` |
-| `msk` | Kafka | `terraform-aws-modules/msk-kafka-cluster/aws` |
-| `redshift` | Data warehouse | `terraform-aws-modules/redshift/aws` |
-| `elasticache` | Redis | `terraform-aws-modules/elasticache/aws` |
-| `s3` | Buckets, public access blocked | `terraform-aws-modules/s3-bucket/aws` |
-| `alb` | Load balancer with TLS | `terraform-aws-modules/alb/aws` |
-| `observability` | Prometheus, Grafana, Loki | on `eks` |
+**Three are configured. Six are stubs.** Saying so here rather than letting you
+find out at `apply`:
+
+| Stack | What | From | |
+|---|---|---|---|
+| `vpc` | Subnets, routing, NAT, flow logs | `terraform-aws-modules/vpc/aws` | ready |
+| `eks` | Control plane, node groups, IRSA | `terraform-aws-modules/eks/aws` | ready |
+| `rds` | PostgreSQL or MySQL, private, encrypted | `terraform-aws-modules/rds/aws` | ready |
+| `msk` | Kafka | `terraform-aws-modules/msk-kafka-cluster/aws` | **stub** |
+| `redshift` | Data warehouse | `terraform-aws-modules/redshift/aws` | **stub** |
+| `elasticache` | Redis | `terraform-aws-modules/elasticache/aws` | **stub** |
+| `s3` | Buckets, public access blocked | `terraform-aws-modules/s3-bucket/aws` | **stub** |
+| `alb` | Load balancer with TLS | `terraform-aws-modules/alb/aws` | **stub** |
+| `observability` | Prometheus, Grafana, Loki | on `eks` | **stub** |
+
+A stub emits the module reference and a name and nothing else. `terraform
+validate` passes on it, because every argument it omits defaults to null or `[]`
+upstream, and `apply` then fails at the AWS API. Selecting one warns, the
+generated block opens with `INCOMPLETE. This block will NOT apply.`, and
+`stackmason stacks` marks it. Filling them in is
+[#10](https://github.com/ehtishammubarik/stackmason/issues/10), and each one is
+a self-contained contribution.
 
 Dependencies resolve automatically: ask for `observability` and you get `vpc`,
 `eks`, `observability`, in that order.
@@ -139,8 +150,8 @@ most scaffolding tools produce.
 - **Not a secret manager.** It emits `sensitive` variables and expects values
   from yours.
 - **Not multi-cloud yet.** AWS only. The registry is structured for more.
-- **Alpha.** The stack catalogue is nine entries and the guardrails are the
-  part that has had the most thought.
+- **Alpha.** The stack catalogue is nine entries, three of them configured, and
+  the guardrails are the part that has had the most thought.
 
 If you want a full platform with drift detection and a control plane, look at
 Terragrunt, Atmos, or Cluster.dev. This does one thing: the first ninety
