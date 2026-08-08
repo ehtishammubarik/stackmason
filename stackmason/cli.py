@@ -77,9 +77,17 @@ def cmd_stacks(args) -> int:
         print(f"\n{cat}")
         for s in items:
             cost = f"  from ~${s.monthly_floor_usd:.0f}/mo" if s.monthly_floor_usd else ""
-            print(f"  {s.id:15} {s.summary}{cost}")
+            mark = "" if s.configured else "  [stub]"
+            print(f"  {s.id:15} {s.summary}{cost}{mark}")
             if s.requires:
                 print(f"  {'':15} requires: {', '.join(s.requires)}")
+
+    if any(not s.configured for s in ALL_STACKS):
+        print(
+            "\n[stub] emits a module reference and a name, nothing else. "
+            "terraform validate\n"
+            "       passes and apply fails at the AWS API. See issue #10."
+        )
     return 0
 
 

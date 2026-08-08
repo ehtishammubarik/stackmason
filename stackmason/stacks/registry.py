@@ -52,6 +52,16 @@ class Stack:
     questions: tuple[Question, ...] = ()
     monthly_floor_usd: float = 0.0
     notes: str = ""
+    # Whether `_module_block` emits enough arguments for `terraform apply` to
+    # succeed. False means the block carries the module reference and a name and
+    # nothing else, which `terraform validate` accepts because every unset
+    # argument has a null or empty default upstream. The failure surfaces at the
+    # AWS API, which is the most expensive place to find it.
+    #
+    # This flag is asserted against the generated output in the test suite, so
+    # it cannot drift away from what the generator actually emits. Flipping it
+    # to True without configuring the stack fails the build.
+    configured: bool = False
 
     @property
     def module_ref(self) -> str:
@@ -65,6 +75,7 @@ VPC = Stack(
     category="foundation",
     module_source="terraform-aws-modules/vpc/aws",
     module_version="~> 5.13",
+    configured=True,
     questions=(
         Question(
             "cidr",
@@ -110,6 +121,7 @@ EKS = Stack(
     category="compute",
     module_source="terraform-aws-modules/eks/aws",
     module_version="~> 20.31",
+    configured=True,
     name_attribute="cluster_name",
     requires=("vpc",),
     monthly_floor_usd=73.0,
@@ -180,6 +192,7 @@ RDS = Stack(
     category="data",
     module_source="terraform-aws-modules/rds/aws",
     module_version="~> 6.10",
+    configured=True,
     name_attribute="identifier",
     requires=("vpc",),
     monthly_floor_usd=50.0,
