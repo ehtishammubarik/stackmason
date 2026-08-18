@@ -805,3 +805,64 @@ def test_generated_output_still_formats_cleanly_with_a_stub_present():
     through the same alignment path as real arguments."""
     body = _module_body("s3")
     assert align_hcl(body) == body
+
+
+# --------------------------------------------------------------------------
+# Documentation that cannot go stale (issue #27)
+#
+# websieve's roadmap sat for weeks promising two features that had already
+# shipped, one of them labelled "the biggest correctness gap". The fix there
+# was a convention; a convention is only as good as the next person's memory.
+# The one number here most likely to rot is the configured-stack count, so it
+# is asserted rather than trusted.
+# --------------------------------------------------------------------------
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def test_roadmap_stack_count_matches_the_registry():
+    """`ROADMAP.md` opens with how many stacks actually apply.
+
+    Configuring a stack without updating that sentence fails here, which is
+    the whole point: the number is load-bearing for anyone deciding whether
+    this tool is usable, and it is exactly the kind of figure nobody
+    remembers to update.
+    """
+    configured = sum(1 for s in ALL_STACKS if s.configured)
+    total = len(ALL_STACKS)
+    # Collapse whitespace: the sentence is line-wrapped in the file, and a
+    # reflow is a formatting change, not a factual one.
+    roadmap = " ".join((REPO_ROOT / "ROADMAP.md").read_text().split())
+
+    spelled = {
+        1: "One",
+        2: "Two",
+        3: "Three",
+        4: "Four",
+        5: "Five",
+        6: "Six",
+        7: "Seven",
+        8: "Eight",
+        9: "Nine",
+    }
+    claim = (
+        f"{spelled[configured]} of the {spelled[total].lower()} advertised stacks are configured"
+    )
+    assert claim in roadmap, (
+        f"ROADMAP.md must say {claim!r}. The registry has {configured} configured "
+        f"of {total}; update the roadmap in the same PR that changes the code."
+    )
+
+
+def test_roadmap_links_every_open_stub_stack():
+    """Every unconfigured stack needs a row someone can act on.
+
+    A stub with no issue behind it is a dead end for a contributor who just
+    read that it does not work.
+    """
+    roadmap = (REPO_ROOT / "ROADMAP.md").read_text()
+    for stack in ALL_STACKS:
+        if not stack.configured:
+            assert f"Configure `{stack.id}`" in roadmap, (
+                f"{stack.id} is a stub with no roadmap row pointing at its issue"
+            )
