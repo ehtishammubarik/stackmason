@@ -52,6 +52,28 @@ modules, which is verified in this repo's own tests.
 Pass `--region` to put both the resources and the state bucket somewhere other
 than `us-east-1`.
 
+## What it is trying to be
+
+**The first ninety minutes of a new infrastructure repository, without the
+mistakes that take six months to surface.**
+
+Not a platform. Not a control plane. A generator that writes a first draft you
+own outright, in plain Terraform, with no runtime dependency on this tool. You
+should be able to delete `stackmason` afterwards and lose nothing.
+
+- **The defaults are the product**, and they are not negotiable silently.
+- **There will never be a flag that turns a refusal into a warning.** It is the
+  most common request a scaffolding tool gets and the answer is permanently no:
+  an escape hatch on a security default is the same as not having the default,
+  because the hatch is what ends up in the example someone copies.
+- **It never emits a credential**, in any form, for any reason.
+- **Every choice is explicable six months later**, via `DECISIONS.md`.
+
+Full detail, plus what is deliberately **not** planned, in the
+[roadmap](ROADMAP.md). Work in flight is tracked in the
+[0.2](https://github.com/ehtishammubarik/stackmason/milestone/1) and
+[0.3](https://github.com/ehtishammubarik/stackmason/milestone/2) milestones.
+
 ## Why not just copy a blog post
 
 Because the defaults are the product.
@@ -193,7 +215,8 @@ MIT.
 ---
 
 If `stackmason` saved you the first ninety minutes of an infrastructure repo, a
-star helps the next person find it. Contributions welcome:
+star helps the next person find it. Contributions welcome, and the
+[roadmap](ROADMAP.md) says which issues are load-bearing:
 [`good first issue`](https://github.com/ehtishammubarik/stackmason/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
 is pre-scoped, and [CONTRIBUTING.md](CONTRIBUTING.md) says how to claim one so
 two people do not build it twice. Read the `terraform validate` section first if
