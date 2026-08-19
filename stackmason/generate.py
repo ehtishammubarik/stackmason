@@ -378,6 +378,106 @@ def _module_block(sid: str, answers: dict, env: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+@dataclass(frozen=True, slots=True)
+class Output:
+    """One value a generated environment publishes.
+
+    Outputs are the seam between this repository and everything downstream: a
+    Helm values file, a deploy job, another configuration reading it through
+    `terraform_remote_state`. Without them the generated repo builds
+    infrastructure and then declines to say what it built.
+    """
+
+    name: str
+    value: str
+    description: str
+    sensitive: bool = False
+
+    def render(self) -> str:
+        lines = [f'output "{self.name}" {{']
+        lines.append(f"  value       = {self.value}")
+        lines.append(f'  description = "{self.description}"')
+        if self.sensitive:
+            lines.append("  sensitive   = true")
+        lines.append("}")
+        return "\n".join(lines) + "\n"
+
+
+# What each stack publishes. An explicit allowlist, never a forwarding of
+# everything upstream exposes.
+#
+# The distinction matters more than it looks. `terraform-aws-modules/rds` also
+# exposes `db_instance_master_user_secret`, and a generator that forwarded
+# outputs wholesale would be one upstream release away from publishing a
+# credential it never meant to. `terraform output` is not privileged: anyone who
+# can read the state can read every output, `-json` ignores `sensitive`, and CI
+# logs are not private. So the rule is not "mark the secret sensitive", it is
+# never create an output that reaches it.
+STACK_OUTPUTS: dict[str, tuple[Output, ...]] = {
+    "vpc": (
+        Output("vpc_id", "module.vpc.vpc_id", "VPC id, for anything that attaches to this network"),
+        Output(
+            "private_subnets",
+            "module.vpc.private_subnets",
+            "Private subnet ids. Where workloads belong",
+        ),
+        Output(
+            "public_subnets",
+            "module.vpc.public_subnets",
+            "Public subnet ids. Load balancers and NAT only",
+        ),
+        Output(
+            "database_subnets",
+            "module.vpc.database_subnets",
+            "Database subnet ids, used by the RDS subnet group",
+        ),
+    ),
+    "eks": (
+        Output(
+            "cluster_name", "module.eks.cluster_name", "Cluster name, for aws eks update-kubeconfig"
+        ),
+        Output("cluster_endpoint", "module.eks.cluster_endpoint", "Kubernetes API endpoint"),
+        Output(
+            "cluster_certificate_authority_data",
+            "module.eks.cluster_certificate_authority_data",
+            "Cluster CA certificate. Not a secret, but a large blob that ruins a plan diff",
+            sensitive=True,
+        ),
+    ),
+    "rds": (
+        Output(
+            "db_instance_address",
+            "module.rds.db_instance_address",
+            "Database hostname. The value an application config needs",
+        ),
+        Output("db_instance_port", "module.rds.db_instance_port", "Database port"),
+    ),
+}
+
+
+def _outputs_tf(stacks: list[str]) -> str:
+    """Outputs for the selected stacks, and nothing else.
+
+    A stack that was not selected contributes nothing, so a generated repo
+    never references a module it does not have.
+    """
+    header = (
+        "# What this environment publishes.\n"
+        "#\n"
+        "# Deliberately short. These are the values something downstream actually\n"
+        "# consumes, not everything the upstream modules expose.\n"
+        "#\n"
+        "# There is no password output, and there is no output that reaches one.\n"
+        "# `terraform output` is not a privileged operation, `-json` ignores the\n"
+        "# sensitive flag, and CI logs are not private. Read the password from\n"
+        "# wherever you supplied it, never from here.\n"
+    )
+    blocks = [o.render() for sid in stacks for o in STACK_OUTPUTS.get(sid, ())]
+    if not blocks:
+        return header + "\n# No stack in this environment publishes anything yet.\n"
+    return header + "\n" + "\n".join(blocks)
+
+
 def _locals(stacks: list[str], answers: dict) -> str:
     """Values referenced more than once, named once.
 
@@ -456,6 +556,7 @@ def build_plan(
         plan.files[f"{base}/versions.tf"] = _versions_tf()
         plan.files[f"{base}/providers.tf"] = _providers_tf(project, env, region)
         plan.files[f"{base}/backend.tf"] = _backend_tf(env, project, region)
+        plan.files[f"{base}/outputs.tf"] = align_hcl(_outputs_tf(resolved))
         plan.files[f"{base}/variables.tf"] = _variables_tf(variables)
         plan.files[f"{base}/terraform.tfvars.example"] = _tfvars_example(variables)
 
@@ -652,6 +753,30 @@ def _readme(project: str, stacks: list[str], envs: list[str], answers: dict) -> 
     else:
         secrets = "No stack in this repository requires a credential.\n"
 
+    readme_region = str(answers.get("aws_region") or DEFAULT_REGION)
+    consume_lines = [
+        "```bash",
+        "terraform output            # everything this environment publishes",
+    ]
+    if "eks" in stacks:
+        consume_lines += [
+            "",
+            "# Point kubectl at the cluster this repository built:",
+            "aws eks update-kubeconfig \\",
+            "  --name $(terraform output -raw cluster_name) \\",
+            f"  --region {readme_region}",
+        ]
+    if "rds" in stacks:
+        consume_lines += [
+            "",
+            "# Where the application connects. Never the password: that is not",
+            "# an output, deliberately. Read it from wherever you supplied it.",
+            "terraform output -raw db_instance_address",
+            "terraform output -raw db_instance_port",
+        ]
+    consume_lines.append("```")
+    consume = "\n".join(consume_lines)
+
     return f"""# {project}
 
 Infrastructure for **{project}**, generated by
@@ -680,6 +805,17 @@ terraform plan
 ```
 
 `terraform.tfvars` is gitignored. It stays that way.
+
+## Consuming what it built
+
+`outputs.tf` publishes the values something downstream needs. They are readable
+after apply, and through `terraform_remote_state` from another configuration.
+
+{consume}
+
+There is no password output and no output that reaches one. `terraform output`
+is not a privileged operation, `-json` ignores the `sensitive` flag, and CI logs
+are not private.
 
 ## Secrets
 

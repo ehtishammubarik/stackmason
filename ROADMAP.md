@@ -64,6 +64,7 @@ Shipped, tested, and on PyPI.
 | `suggest` on every sizing question | reasoning written to `DECISIONS.md` |
 | **Explicit provider region and `default_tags`** | region is never inherited from the ambient shell ([#15]) |
 | Generated repo is `terraform fmt` clean | so it passes the CI it ships with on its first commit |
+| **`outputs.tf` per environment** | subnet ids, cluster endpoint, database address. No password output and none that reaches one ([#29]) |
 | A real `plan` verified | `eks` + `rds` plans 64 resources, 0 changes, 0 destroys |
 
 ## Next (0.2)
@@ -81,7 +82,6 @@ matters more.** Each is self-contained and independently mergeable.
 | [Configure `redshift`](https://github.com/ehtishammubarik/stackmason/issues/25) | The most expensive stub to discover at apply time |
 | [Configure `observability`](https://github.com/ehtishammubarik/stackmason/issues/26) | Largest. Helm releases, not a module reference; needs providers no generated repo configures yet |
 | [Stub tracking issue](https://github.com/ehtishammubarik/stackmason/issues/10) | Closes when all six are done |
-| [Generated environments have no outputs](https://github.com/ehtishammubarik/stackmason/issues/9) | Nothing downstream can consume the repo |
 | [Plan summary before writing](https://github.com/ehtishammubarik/stackmason/issues/1) | Cost and blast radius visible before a file is created |
 | [The interview never asks for a region](https://github.com/ehtishammubarik/stackmason/issues/14) | Needs a notion of questions belonging to no stack |
 
@@ -146,3 +146,4 @@ touching what gets emitted.
 
 [#15]: https://github.com/ehtishammubarik/stackmason/pull/15
 [#19]: https://github.com/ehtishammubarik/stackmason/pull/19
+[#29]: https://github.com/ehtishammubarik/stackmason/pull/29
