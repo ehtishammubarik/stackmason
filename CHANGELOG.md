@@ -4,6 +4,17 @@
 
 ### Added
 
+- **`outputs.tf` in every generated environment** ([#9]). A generated repo built
+  infrastructure and then declined to say what it built: no cluster endpoint, no
+  database address, no subnet ids, so the only way to find them was
+  `terraform state show`. That is a workaround, not a workflow, and it does not
+  survive being put in a pipeline. Outputs are an explicit per-stack allowlist,
+  never a forwarding of everything the upstream modules expose, and **there is no
+  password output and no output that reaches one**: `terraform output` is not a
+  privileged operation, `-json` ignores `sensitive`, and CI logs are not private.
+  A test fails on any output whose name or value expression is password-shaped.
+  The generated README gains a "Consuming what it built" section with the
+  `aws eks update-kubeconfig` line.
 - **Stub stacks now say so, everywhere someone might look** ([#10]). Six of the
   nine advertised stacks emit a module reference and a name and nothing else.
   `terraform validate` accepts that, because every argument they omit defaults
@@ -75,6 +86,7 @@ A generated `eks` + `rds` repository now plans cleanly: **64 resources to add,
 
 [#7]: https://github.com/ehtishammubarik/stackmason/issues/7
 [#8]: https://github.com/ehtishammubarik/stackmason/issues/8
+[#9]: https://github.com/ehtishammubarik/stackmason/issues/9
 [#10]: https://github.com/ehtishammubarik/stackmason/issues/10
 [#11]: https://github.com/ehtishammubarik/stackmason/issues/11
 [#12]: https://github.com/ehtishammubarik/stackmason/issues/12

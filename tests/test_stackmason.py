@@ -866,3 +866,111 @@ def test_roadmap_links_every_open_stub_stack():
             assert f"Configure `{stack.id}`" in roadmap, (
                 f"{stack.id} is a stub with no roadmap row pointing at its issue"
             )
+
+
+# --------------------------------------------------------------------------
+# Generated outputs (issue #9)
+#
+# `terraform output` is not a privileged operation: anyone who can read the
+# state can read every output, `-json` ignores `sensitive`, and CI logs are not
+# private. So the rule is not "mark the secret sensitive", it is never create an
+# output that reaches the password at all.
+# --------------------------------------------------------------------------
+
+# Substrings that must never appear in an output name or in what it references.
+# Deliberately broad: a false positive costs one rename, a false negative
+# publishes a credential.
+SECRET_SHAPED = (
+    "password",
+    "passwd",
+    "secret",
+    "master_user",
+    "credential",
+    "private_key",
+    "token",
+)
+
+
+def _outputs_tf(stacks: list[str], env: str = "dev") -> str:
+    answers = {**BASE, "engine": "postgres"}
+    plan = build_plan(Path("/x"), "acme", stacks, [env], answers)
+    return plan.files.get(f"environments/{env}/outputs.tf", "")
+
+
+def _output_blocks(text: str) -> dict[str, str]:
+    """Map output name -> body, from generated HCL."""
+    blocks: dict[str, str] = {}
+    for match in re.finditer(r'output\s+"([^"]+)"\s+\{(.*?)\n\}', text, re.S):
+        blocks[match.group(1)] = match.group(2)
+    return blocks
+
+
+def test_every_environment_gets_an_outputs_file():
+    assert _outputs_tf(["vpc"]).strip(), "no outputs.tf was generated"
+
+
+def test_no_output_is_named_or_sourced_from_anything_password_shaped():
+    """The load-bearing test for #9.
+
+    Checks the name and the value expression. An output called `endpoint` that
+    reads `module.rds.db_instance_master_user_secret` is exactly as dangerous
+    as one called `password`, and only the second is caught by reading names.
+    """
+    for stacks in (["vpc"], ["vpc", "eks"], ["vpc", "rds"], ["vpc", "eks", "rds"]):
+        blocks = _output_blocks(_outputs_tf(stacks))
+        for name, body in blocks.items():
+            # Name and value expression only. `description` is prose written for
+            # a human and may legitimately say "not a secret"; scanning it
+            # produces false positives whose only fix is writing a worse
+            # description. What can leak is what the output exposes.
+            value = next(
+                (
+                    ln.split("=", 1)[1].strip()
+                    for ln in body.splitlines()
+                    if ln.strip().startswith("value")
+                ),
+                "",
+            )
+            haystack = f"{name} {value}".lower()
+            for needle in SECRET_SHAPED:
+                assert needle not in haystack, (
+                    f"output {name!r} for stacks {stacks} touches {needle!r}: value = {value!r}"
+                )
+
+
+def test_outputs_cover_only_the_stacks_that_were_selected():
+    """A repo generated without RDS must not reference module.rds."""
+    for stacks in (["vpc"], ["vpc", "eks"], ["vpc", "rds"]):
+        text = _outputs_tf(stacks)
+        for absent in {"vpc", "eks", "rds"} - set(stacks):
+            assert f"module.{absent}." not in text, (
+                f"outputs.tf references module.{absent} but {absent} was not selected"
+            )
+
+
+@pytest.mark.parametrize(
+    ("stack", "expected"),
+    [
+        ("vpc", ("vpc_id", "private_subnets", "public_subnets", "database_subnets")),
+        ("eks", ("cluster_name", "cluster_endpoint", "cluster_certificate_authority_data")),
+        ("rds", ("db_instance_address", "db_instance_port")),
+    ],
+)
+def test_each_stack_contributes_the_outputs_a_consumer_needs(stack, expected):
+    stacks = ["vpc"] if stack == "vpc" else ["vpc", stack]
+    blocks = _output_blocks(_outputs_tf(stacks))
+    for name in expected:
+        assert name in blocks, f"{stack} selected but output {name!r} missing"
+
+
+def test_the_cluster_ca_certificate_is_marked_sensitive():
+    """Not a secret, but it is a large base64 blob that ruins a plan diff and
+    has no business being echoed by default."""
+    blocks = _output_blocks(_outputs_tf(["vpc", "eks"]))
+    # Alignment-insensitive: align_hcl pads `=` to the longest key in the run,
+    # so the exact spacing shifts whenever a neighbouring key changes length.
+    assert re.search(r"^\s+sensitive\s+= true$", blocks["cluster_certificate_authority_data"], re.M)
+
+
+def test_outputs_file_is_already_fmt_clean():
+    assert align_hcl(_outputs_tf(["vpc", "eks", "rds"])) == _outputs_tf(["vpc", "eks", "rds"])
