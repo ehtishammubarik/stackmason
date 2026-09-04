@@ -65,7 +65,7 @@ Shipped, tested, and on PyPI.
 | **Explicit provider region and `default_tags`** | region is never inherited from the ambient shell ([#15]) |
 | Generated repo is `terraform fmt` clean | so it passes the CI it ships with on its first commit |
 | **`outputs.tf` per environment** | subnet ids, cluster endpoint, database address. No password output and none that reaches one ([#29]) |
-| A real `plan` verified | `eks` + `rds` plans 64 resources, 0 changes, 0 destroys |
+| A real `plan` verified | the release workflow generates `eks` + `rds` and runs `terraform plan` against it before publishing |
 
 ## Next (0.2)
 
