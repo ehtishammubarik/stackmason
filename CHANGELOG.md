@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-04
+
+Eight changes since `v0.1.0`. Three of them are the reason this release exists
+at all: a generated repository now applies, six of the nine advertised stacks
+admit they are stubs, and a contributor arriving from a `good first issue` label
+is no longer handed nothing.
+
 ### Added
 
 - **`outputs.tf` in every generated environment** ([#9]). A generated repo built
@@ -43,6 +50,48 @@
   the provider and the state bucket together, since they are generated from one
   value and a test asserts they match.
 
+- **Production guardrails that warn rather than block** ([#5], [#6]). The
+  environment name asserts an intent the generator can already check, and it was
+  saying nothing. A single-AZ database, a NAT gateway shared across AZs, a node
+  group minimum below two, and spot instances now each raise a finding in any
+  environment named `prod`, `production`, `prd`, or `live`. WARN and not BLOCK
+  deliberately: plenty of people have exactly one environment, call it prod, and
+  are right to run it cheaply. Blocking that would be wrong; staying silent when
+  the mismatch is visible is also wrong. Backup retention is deliberately not
+  checked here even though it fits the theme, because `check_data_protection`
+  already reports it as `DAT002`, and two findings for one problem trains people
+  to skim the report. A test asserts no duplicate codes, and another asserts the
+  remedy text is substantive, because "consider hardening production" is advice
+  nobody can act on.
+
+### Documentation
+
+- **A contributing guide** ([#18]). The repo labelled issues `good first issue`
+  and `help wanted` and then gave arrivals nothing: no setup beyond the README
+  install line, no review expectations, and no statement of the one trap that has
+  caused every real bug here. The section that matters most is the
+  `terraform validate` trap, which is satisfied by empty lists and null
+  arguments, so it passed on every CI run while [#7], [#11], and [#12] each made
+  generated repositories impossible to apply. Three rules follow from that: test
+  the emitted HCL rather than the Python emitting it, run a real plan when you
+  change output, and write the test so you have watched it fail. It also states
+  one issue per PR, claiming an issue before building, and that a
+  first-contribution workflow run is held, so "no checks reported" is not a pass.
+- **A roadmap and a vision, with the stack count enforced by CI** ([#28]). There
+  were 13 open issues and two milestones and nothing saying which mattered. The
+  advertised stack count in `ROADMAP.md` is now asserted against the registry by a
+  test, which fails with the message "update the roadmap in the same PR that
+  changes the code", so the roadmap cannot drift from the catalogue the tool
+  ships. A second test requires every unconfigured stack to link an issue, so a
+  stub is never a dead end for a contributor who picked it.
+- **The stale test figures are gone rather than corrected** ([#17], [#20]). The
+  README claimed 57 tests and 88% coverage; the suite was 96 and coverage 90%,
+  so both were false in the file people use to judge the project. Rewriting the
+  numbers would only reset the clock, because they drifted for want of anything
+  keeping them true. The count is gone entirely and the coverage figure is now a
+  CI floor of 88% across Python 3.10, 3.11, and 3.12. Verified the floor is real
+  and not decorative: `pytest` exits 1 at `--cov-fail-under=95` and 0 at 88.
+
 ### Fixed
 
 Four defects that shared one cause: the generated Terraform was checked with
@@ -76,20 +125,40 @@ four were type-correct and semantically wrong, and the first real
 
 ### Testing
 
-Twelve tests asserting properties of the emitted Terraform rather than of the
+The suite now asserts properties of the emitted Terraform rather than of the
 Python that emits it: every consumed subnet list is defined, every required
 variable is reachable without a prompt, the database security group port matches
-the engine, subnet ranges do not overlap at any supported AZ count.
+the engine, and subnet ranges do not overlap at any supported AZ count.
 
-A generated `eks` + `rds` repository now plans cleanly: **64 resources to add,
-0 to change, 0 to destroy**.
+No test count is quoted here, and the previous entry's "twelve" has been removed.
+It was [#20] recurring in the one file that change did not cover: a number in a
+released entry is a dated snapshot and may stand, but a number in `Unreleased` is
+not yet history and was simply wrong. What is quoted instead is the gate: CI enforces a coverage floor
+of 88% on Python 3.10, 3.11, and 3.12, and the release workflow re-runs the suite
+against the installed wheel, then asserts on the published artifact itself that
+the guardrails still refuse an `0.0.0.0/0` database and that the generated output
+contains no literal credential. A generator whose guardrails silently stopped
+working would be worse than no generator, so that is checked on the thing users
+install rather than on the tree it was built from.
 
+There is no `terraform plan` in the release workflow. The `eks` + `rds` plan was
+run by hand against a real AWS account during 0.1.1 development, and a figure
+from a manual run is exactly the kind of number this entry declines to quote.
+Automating it is [#31].
+
+[#5]: https://github.com/ehtishammubarik/stackmason/issues/5
+[#6]: https://github.com/ehtishammubarik/stackmason/issues/6
 [#7]: https://github.com/ehtishammubarik/stackmason/issues/7
 [#8]: https://github.com/ehtishammubarik/stackmason/issues/8
 [#9]: https://github.com/ehtishammubarik/stackmason/issues/9
 [#10]: https://github.com/ehtishammubarik/stackmason/issues/10
 [#11]: https://github.com/ehtishammubarik/stackmason/issues/11
 [#12]: https://github.com/ehtishammubarik/stackmason/issues/12
+[#17]: https://github.com/ehtishammubarik/stackmason/issues/17
+[#18]: https://github.com/ehtishammubarik/stackmason/issues/18
+[#20]: https://github.com/ehtishammubarik/stackmason/issues/20
+[#28]: https://github.com/ehtishammubarik/stackmason/issues/28
+[#31]: https://github.com/ehtishammubarik/stackmason/issues/31
 
 ## [0.1.0] - 2026-07-29
 
@@ -124,3 +193,4 @@ about.
 - Generated repositories are a first draft. Reading the plan is still your job.
 
 [0.1.0]: https://github.com/ehtishammubarik/stackmason/releases/tag/v0.1.0
+[0.1.1]: https://github.com/ehtishammubarik/stackmason/releases/tag/v0.1.1
