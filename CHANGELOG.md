@@ -2,7 +2,44 @@
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-20
+
+Identical package contents to 0.1.1. **0.1.1 was tagged and never published**,
+so this is the version to install.
+
+The 0.1.1 release run failed at `test-wheel` on all three Pythons and correctly
+published nothing, not to TestPyPI and not to PyPI. The cause was in the release
+workflow rather than the package: it asserted `publicly_accessible = false` with
+a single space, and `create_db_subnet_group` joined that block in [#13], so
+`terraform fmt` realigned the attribute to four spaces. The workflow had been red
+since 2026-07-31 and nothing noticed, because it runs only on a tag push and no
+tag was cut in between.
+
+The database was private throughout and prod `deletion_protection` was true
+throughout. Nothing was wrong with what the generator emitted.
+
+### Fixed
+
+- **The release workflow no longer re-asserts HCL the test suite already owns**
+  ([#33]). `tests/test_stackmason.py` covers both properties whitespace-tolerantly
+  and runs on every pull request, and the release workflow already runs that suite
+  against the installed wheel with the source tree deleted. The workflow copy was
+  duplication with no feedback loop between releases, which is precisely why it
+  drifted while the copy next to the code stayed correct. What remains in the
+  smoke test is what the suite genuinely cannot see: that the entry point resolves
+  from the wheel, that a real `stackmason new` writes real files, that the
+  published build still refuses an `0.0.0.0/0` database and writes nothing when it
+  blocks, and that generated output carries no literal credential.
+- The `deletion_protection` assertion in the test suite is now whitespace-tolerant
+  too, matching the style already used for `publicly_accessible`.
+
+`v0.1.1` is left in place as a git tag rather than deleted or moved. It records
+that a release was attempted and refused, which is a true thing that happened.
+
 ## [0.1.1] - 2026-09-04
+
+Tagged, but never published. See the 0.1.2 entry above. Everything described
+below shipped in 0.1.2.
 
 Eight changes since `v0.1.0`. Three of them are the reason this release exists
 at all: a generated repository now applies, six of the nine advertised stacks
@@ -159,6 +196,7 @@ Automating it is [#31].
 [#20]: https://github.com/ehtishammubarik/stackmason/issues/20
 [#28]: https://github.com/ehtishammubarik/stackmason/issues/28
 [#31]: https://github.com/ehtishammubarik/stackmason/issues/31
+[#33]: https://github.com/ehtishammubarik/stackmason/issues/33
 
 ## [0.1.0] - 2026-07-29
 
@@ -194,3 +232,4 @@ about.
 
 [0.1.0]: https://github.com/ehtishammubarik/stackmason/releases/tag/v0.1.0
 [0.1.1]: https://github.com/ehtishammubarik/stackmason/releases/tag/v0.1.1
+[0.1.2]: https://github.com/ehtishammubarik/stackmason/releases/tag/v0.1.2
