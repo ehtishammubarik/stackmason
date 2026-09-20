@@ -245,8 +245,15 @@ def test_database_password_variable_has_no_default(tmp_path):
 
 def test_production_gets_deletion_protection_and_dev_does_not(tmp_path):
     plan = build_plan(tmp_path, "acme", ["rds"], ["dev", "prod"], BASE)
-    assert "deletion_protection     = true" in plan.files["environments/prod/main.tf"]
-    assert "deletion_protection     = false" in plan.files["environments/dev/main.tf"]
+    # Whitespace-tolerant on purpose. terraform fmt realigns a block whenever a
+    # longer attribute name joins it, and an exact-alignment assertion turns
+    # every such edit into an unrelated failure. See #33.
+    assert re.search(
+        r"^\s+deletion_protection\s+= true$", plan.files["environments/prod/main.tf"], re.M
+    )
+    assert re.search(
+        r"^\s+deletion_protection\s+= false$", plan.files["environments/dev/main.tf"], re.M
+    )
 
 
 def test_database_is_never_publicly_accessible(tmp_path):

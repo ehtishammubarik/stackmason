@@ -159,17 +159,26 @@ jobs:
           JSON
           stackmason new acme --answers /tmp/answers.json --yes -o /tmp/gen
 
+          # Assert only what the installed artifact can be wrong about that the
+          # suite above cannot see: that the entry point resolves from the wheel
+          # and that a real `stackmason new` writes real files to a real disk.
+          #
+          # Deliberately NO assertions about the CONTENT of the generated HCL.
+          # tests/test_stackmason.py already owns those, whitespace-tolerantly,
+          # and the step above runs that suite against the installed package
+          # with the source tree deleted. A duplicate here is strictly worse: it
+          # only runs on a tag push, so it has no feedback loop between releases.
+          # One did exactly that, asserting `publicly_accessible = false` with a
+          # single space. #13 added `create_db_subnet_group` to the same block,
+          # terraform fmt realigned it to four, and the workflow was red for five
+          # weeks because nothing ran it. See #33. Do not add one back.
           python - <<'PY'
           import pathlib
           root = pathlib.Path("/tmp/gen")
           for f in ("environments/dev/main.tf", "environments/prod/main.tf",
+                    "environments/dev/outputs.tf", "environments/prod/outputs.tf",
                     "ARCHITECTURE.md", "DECISIONS.md", ".gitignore"):
               assert (root / f).exists(), f
-          prod = (root / "environments/prod/main.tf").read_text()
-          assert "deletion_protection     = true" in prod
-          assert "publicly_accessible = false" in prod
-          assert "cluster_name" in prod
-          assert (root / "environments/dev/main.tf").read_text().count("deletion_protection     = false") == 1
           print("generated repository verified")
           PY
 
