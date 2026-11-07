@@ -104,6 +104,29 @@ And what it always emits:
 
 Run `stackmason plan` to see all of it without writing a file.
 
+## How it differs: generation-time vs scan-after-write
+
+stackmason is not a scanner. Checkov, tfsec/Trivy, and OPA/Rego look at
+Terraform **after it is written** and flag problems they find. stackmason
+prevents insecure HCL from existing in the first place: it refuses to generate
+a configuration that would need flagging. That is a different category of tool,
+not a worse competitor to the established scanners.
+
+| Tool | When it runs | What it needs installed | What it does when it finds a problem |
+|---|---|---|---|
+| **stackmason** | At **generation time**, before any file exists | Just Python. No Terraform, no cloud credentials | Refuses to write the bad configuration; you answer differently |
+| **Checkov** | After the HCL is written (pre-apply / CI) | `pip install checkov` | Reports a failed check; you edit the files |
+| **tfsec / Trivy** | After the HCL is written (CI) | A binary / `pip install trivy` | Reports a failed check; you edit the files |
+| **OPA / Rego** | After the HCL is written, as a policy gate | `opa` plus a policy bundle | Denies the plan/policy; you fix the file or the policy |
+
+The honest limits: stackmason is **AWS-only today**, and **3 of its 9 stacks
+are fully configured** — the other six are stubs that emit a module reference and
+a name and nothing else (see [#10](https://github.com/ehtishammubarik/stackmason/issues/10)).
+If you already have Terraform written, or you need the breadth of a general
+scanner, Checkov/tfsec/OPA are the right tools and stackmason deliberately does
+not compete with them. If you are starting a repository from scratch, preventing
+the misconfiguration before it is committed is cheaper than finding it after.
+
 ## Install
 
 ```bash
