@@ -1,5 +1,21 @@
 # stackmason
 
+**`terraform validate` passes. `apply` still fails.**
+
+Validate checks that your HCL is well-formed and type-correct. It does not check
+that it means anything — an empty list and a null argument both pass.
+Misconfiguration is now the single largest technical breach vector: Verizon's
+2026 Data Breach Investigations Report attributes 14% of all global breaches in
+Q1 2026 to cloud misconfiguration, up from 9% in 2024 — and most of it ships
+through a pipeline where every check was green.
+
+stackmason is a **generation-time guardrail**: it refuses to write the insecure
+default in the first place, instead of flagging it after the fact like a
+scan-after-write linter. The result is a repository that is **secure by
+default** — zero dependencies, no runtime tool needed — so "terraform validate
+passes apply fails" stops being the failure mode you discover on your first real
+plan.
+
 **Answer some questions. Get a Terraform repository that is secure by default.**
 
 ![Python](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-3776AB?logo=python&logoColor=white)
