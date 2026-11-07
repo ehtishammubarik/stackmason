@@ -179,6 +179,59 @@ If you want a full platform with drift detection and a control plane, look at
 Terragrunt, Atmos, or Cluster.dev. This does one thing: the first ninety
 minutes of a new infrastructure repository, without the mistakes.
 
+## FAQ
+
+**Why does `terraform plan` succeed but `apply` fail?**
+
+`plan` reads your configuration and tells you what it *would* do; it does not
+call the AWS API. It succeeds even when a value is semantically empty or wrong,
+because the configuration is type-correct. The failure happens later, at
+`apply`, when the API rejects it. stackmason exists to close that gap — see
+[#12](https://github.com/ehtishammubarik/stackmason/issues/12) for a concrete
+example of a repo that validated and then could not apply.
+
+**How do I stop a public S3 bucket with Terraform?**
+
+Block public access on the bucket: set `block_public_acls`, `block_public_policy`,
+`ignore_public_acls`, and `restrict_public_buckets` to `true`. stackmason's
+`s3` stack emits these by default, and its guardrails refuse to generate an
+open bucket in the first place.
+
+**Why does stackmason refuse `skip_final_snapshot` in production?**
+
+A final snapshot is the last copy of your database before it is destroyed.
+Skipping it in production means a single bad `terraform destroy` permanently
+loses the data. stackmason refuses to emit it for a `prod` environment, and
+warns elsewhere.
+
+**Why is stackmason AWS-only?**
+
+The registry is built around AWS modules and their real behaviors. Azure and
+GCP support is planned but not implemented yet — see
+[#3](https://github.com/ehtishammubarik/stackmason/issues/3).
+
+**What does "zero dependencies" mean in practice?**
+
+`pip install stackmason` pulls in *nothing else* — no SDK, no runtime the tool
+depends on. It writes plain Terraform, so after generation you can delete
+stackmason and the repository keeps working.
+
+**What happens if I pick a stub stack?**
+
+You get a module reference and a name and nothing else. `terraform validate`
+passes, because every omitted argument defaults to null or empty, but `apply`
+fails at the AWS API. The tool marks these stacks `[stub]`, warns when you
+select them, and writes an `INCOMPLETE. This block will NOT apply.` banner into
+the generated block. Filling the six stubs out is
+[#10](https://github.com/ehtishammubarik/stackmason/issues/10).
+
+**Does CI prove the generated repo actually plans?**
+
+Not yet. [#31](https://github.com/ehtishammubarik/stackmason/issues/31) tracks
+a CI-level plan gate; until it lands, `terraform validate` is the automated
+check, and the README asks you to run a real `terraform plan` and read it
+before applying.
+
 ## Releases
 
 Published on tag. The pipeline installs the built wheel and sdist into clean
