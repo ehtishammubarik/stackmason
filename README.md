@@ -3,11 +3,11 @@
 **`terraform validate` passes. `apply` still fails.**
 
 Validate checks that your HCL is well-formed and type-correct. It does not check
-that it means anything — an empty list and a null argument both pass. Cloud
-misconfiguration is repeatedly cited as a leading cause of cloud security
-incidents (IEEE [1](https://ieeexplore.ieee.org/abstract/document/11647997),
-Verizon DBIR 2026), and most of it ships through a pipeline where every check
-was green.
+that it means anything — an empty list and a null argument both pass.
+Misconfiguration is now the single largest technical breach vector: Verizon's
+2026 Data Breach Investigations Report attributes 14% of all global breaches in
+Q1 2026 to cloud misconfiguration, up from 9% in 2024 — and most of it ships
+through a pipeline where every check was green.
 
 stackmason is a **generation-time guardrail**: it refuses to write the insecure
 default in the first place, instead of flagging it after the fact like a
